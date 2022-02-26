@@ -17,6 +17,7 @@
 
 #include "stack.h"
 #include "request.h"
+#include "hashmap.h"
 
 #define MAXLINE 4096
 

@@ -1,3 +1,9 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <pthread.h>
+
 // all socket related packages
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -9,21 +15,19 @@
 #include <netdb.h>
 
 #include "express.h"
-#include "request.h"
-#include "hashmap.h"
 
 #define MAXLINE 4096
 
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
 
-	void (*handler)(req_t *, res_t *); // handles processing for the request
+	void (*handler)(req_t, res_t); // handles processing for the request
 									   // made by user
 
 	/* more to come! */
 } listen_t;
 
-listen_t *new_listener(char *r_type, void (*handler)(req_t *, res_t *)) {
+listen_t *new_listener(char *r_type, void (*handler)(req_t, res_t)) {
 	listen_t *r = malloc(sizeof(listen_t));
 
 	r->r_type = r_type;
@@ -50,36 +54,13 @@ void print_app_settings(void *app_set) {
 
 	return;
 }
-/*
-	Express Struct:
-		This will handle pretty much everything
-		Any functions basically just alter whatever is in here
-*/
-struct Express {
-	struct Express *my_ptr; // points to memory for this express app
 
-	// routes for different request types (currently on GET and POST)
-	hashmap *routes;
-
-	/* currently only hashes string to string */
-	hashmap *app_settings;
-	/*
-		`use`d parameters -- with concatenated string ("use")
-		`set` parameters -- with concatenated string ("set")
-
-		the concatenation is how to differentiate between different
-		settings while using a single hashmap object
-	*/
-
-	socket_t *socket;
-
-	int server_open; // for evaluting if the server is trying to close
-	/* more to come! */
-};
 
 /* setup an initial service */
 app express() {
 	app *app_t = malloc(sizeof(app));
+
+	app_t->my_ptr = app_t;
 
 	app_t->routes = make__hashmap(1, print_listen_t, free_listen_t);
 	app_t->app_settings = make__hashmap(0, print_app_settings, NULL);
@@ -89,9 +70,9 @@ app express() {
 	return *app_t;
 }
 
-void acceptor_function(void *app_ptr);
+void *acceptor_function(void *app_ptr);
 
-int listen(char *PORT, app app_t) {
+int app_listen(char *PORT, app app_t) {
 	socket_t *socket = get_socket(NULL, PORT);
 
 	if (listen(socket->sock, BACKLOG) == -1) {
@@ -99,15 +80,15 @@ int listen(char *PORT, app app_t) {
 		return 1;
 	}
 
-	app_t.socket = socket;
+	app_t.my_ptr->socket = socket;
 
 	// start acceptor thread
 	pthread_t accept_thread;
-	int check = pthread_create(&accept_thread, NULL, &acceptor_function, app_t->my_ptr);
-
-
+	int check = pthread_create(&accept_thread, NULL, &acceptor_function, app_t.my_ptr);
 
 	printf("server go vroom\n");
+
+	while(getchar() != '0');
 
 	destroy_socket(socket);
 
@@ -117,11 +98,11 @@ int listen(char *PORT, app app_t) {
 /* ROUTE BUILDER -- POINTS TO GENERIC ROUTE BUILDER
 	|__ the only reason for these functions is to build a slightly
 		simpler interface on top of the library */
-int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t *, res_t *)) {
+int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
 	// check that the route doesn't exist (assumes the type matches)
 	hashmap__response *routes = (hashmap__response *) get__hashmap(app_t.routes, endpoint);
 
-	for (int check_route = 0; check_route < routes->payload__length; check_route) {
+	for (int check_route = 0; routes && check_route < routes->payload__length; check_route) {
 		listen_t *r = (listen_t *) routes->payload[check_route];
 
 		if (strcmp(type, r->r_type) == 0) { // found match
@@ -143,35 +124,35 @@ int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t
 	return 0;
 }
 
-int get(app app_t, char *endpoint, void (*handler)(req_t *, res_t *)) {
+int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
 	return build_new_route(app_t, "get", endpoint, handler);
 }
 
-int post(app app_t, char *endpoint, void (*handler)(req_t *, res_t *)) {
+int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
 	return build_new_route(app_t, "post", endpoint, handler);
 }
 
 /* EXPRESS APP SETTINGS BUILDER */
-void use(app app_t, char *route, char *descript) {
+void app_use(app app_t, char *route, char *descript) {
 	// update route name to have a "use" at the beginning
 
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
-	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e';
+	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t->app_settings, new_route_name, descript);
+	insert__hashmap(app_t.app_settings, new_route_name, descript);
 
 	return;
 }
 
-void set(app app_t, char *route, char *descript) {
+void app_set(app app_t, char *route, char *descript) {
 	// update route name to have a "set" at the beginning
 
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
-	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't';
+	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t->app_settings, new_route_name, descript);
+	insert__hashmap(app_t.app_settings, new_route_name, descript);
 
 	return;
 }
@@ -182,12 +163,16 @@ typedef struct ConnectionHandle {
 
 	app *app_t; // all the meta data
 } ch_t;
+
 /* LISTENER FUNCTIONS FOR SOCKET */
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
 // Beej Hall websockets (http://beej.us/guide/bgnet/html/)
-void connection(void *app_ptr) {
+void *connection(void *app_ptr) {
+	printf("new connnection\n");
+
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
 	app app_t = *((ch_t *) app_ptr)->app_t;
+	printf("%d with server %d\n", new_fd, app_t.server_open);
 
 	int recv_res = 1;
 	char *buffer = malloc(sizeof(char) * MAXLINE);
@@ -201,29 +186,29 @@ void connection(void *app_ptr) {
 			continue;
 		}
 
-		if (buffer_len == 0) // still waiting
-			continue;
+		if (recv_res == 0) break;
 
-		// read data...
+		// otherwise we have data!
 		printf("%s\n", buffer);
 	}
 
 	// if the close occurs due to thread_status, send an error page
-	if (!*client_data->thread_status);
+	if (!app_t.server_open);
 
 	close(new_fd);
 	free(buffer);
-	free(client_data);
 
 	pthread_t *retval;
 	// close thread
 	pthread_exit(retval);
+
+	return NULL;
 }
 
-void acceptor_function(void *app_ptr) {
+void *acceptor_function(void *app_ptr) {
 	app app_t = *(app *) app_ptr;
 
-	int sock_fd = ;
+	int sock_fd = app_t.socket->sock;
 	int new_fd;
 	char s[INET6_ADDRSTRLEN];
 	struct sockaddr_storage their_addr; // connector's address information
@@ -237,10 +222,14 @@ void acceptor_function(void *app_ptr) {
 			continue;
 		}
 
+		printf("new socket %d\n", new_fd);
 		// at this point we can send the user into their own thread
+		ch_t *new_thread_data = malloc(sizeof(ch_t));
+		new_thread_data->p_handle = new_fd;
+		new_thread_data->app_t = app_t.my_ptr;
 		pthread_t socket;
-		pthread_create(&socket, NULL, &connection, app_ptr);
+		pthread_create(&socket, NULL, &connection, new_thread_data);
 	}
 
-	return 0;
+	return NULL;
 }
