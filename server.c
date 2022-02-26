@@ -3,18 +3,45 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "express.h"
 #include "request.h"
 
 #define PORT "8888"
+#define PATH_MAX 200
 
-int home_page(req_t *req, res_t *res) {
-	
+int home_page(req_t req, res_t res) {
+	printf("received request\n");
+
+	return 0;
 }
 
 int main() {
-	int status = listen(PORT);
+	app new_server = express();
+
+	char *setup_public_dir = malloc(sizeof(char) * PATH_MAX);
+	if (!getcwd(setup_public_dir, sizeof(char) * PATH_MAX)) {
+		fprintf(stderr, "getcwd() error\n");
+		exit(1);
+	}
+
+	strcat(setup_public_dir, "public");
+	use(new_server, "/", setup_public_dir);
+
+	char *setup_views_dir = malloc(sizeof(char) * PATH_MAX);
+	if (!getcwd(setup_views_dir, sizeof(char) * PATH_MAX)) {
+		fprintf(stderr, "getcwd() error\n");
+		exit(1);
+	}
+
+	strcat(setup_views_dir, "views");
+	set(new_server, "views", setup_views_dir);
+
+	// setup listener routes
+	get(new_server, "/", home_page);
+
+	int status = listen(PORT, new_server);
 
 	return 0;
 }

@@ -167,6 +167,60 @@ char **handle_array(char *res, int *max_len) {
 	return arr;
 }
 
+hashmap *read_headers(char *header_str, int *header_end) {
+	int past_lines = 0;
+
+	hashmap *header_map = make__hashmap(0, NULL, destroyCharKey);
+
+	// jump past HTTP: status line
+	while ((int) header_str[past_lines] != 10)
+		past_lines++;
+
+	past_lines += 1;
+
+	// while the newline doesn't start with a newline
+	// (double newline is end of header)
+	while ((int) header_str[past_lines] != 10) {
+		int *head_max = malloc(sizeof(int)), head_index = 0;
+		*head_max = 8;
+		char *head_tag = malloc(sizeof(char) * *head_max);
+
+		int *attr_max = malloc(sizeof(int)), attr_index = 0;
+		*attr_max = 8;
+		char *attr_tag = malloc(sizeof(char) * *attr_max);
+
+		// head head tag
+		while ((int) header_str[past_lines + head_index] != 58) {
+
+			head_tag[head_index++] = header_str[past_lines + head_index];
+
+			head_tag = resize_array(head_tag, head_max, head_index, sizeof(char));
+			head_tag[head_index] = '\0';
+		}
+
+		past_lines += head_index + 2;
+
+		// read attr tag
+		while ((int) header_str[past_lines + attr_index + 1] != 10) {
+			attr_tag[attr_index++] = header_str[past_lines + attr_index];
+
+			attr_tag = resize_array(attr_tag, attr_max, attr_index, sizeof(char));
+			attr_tag[attr_index] = '\0';
+		}
+
+		// check for a carraige return (\r). This means the newline character is one further along
+		past_lines += attr_index + ((int) header_str[past_lines + attr_index + 2] == 13 ? 3 : 2);
+
+		insert__hashmap(header_map, head_tag, attr_tag, "", compareCharKey, destroyCharKey);
+
+		free(head_max);
+		free(attr_max);
+	}
+
+	*header_end = past_lines + 1;
+	return header_map;
+}
+
 socket_t *get_socket(char *HOST, char *PORT) {
 	// connection stuff
 	//int *sock_fd = malloc(sizeof(int)); // listen on sock_fd
