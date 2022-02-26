@@ -17,7 +17,6 @@
 
 #include "stack.h"
 #include "request.h"
-#include "hashmap.h"
 
 #define MAXLINE 4096
 
@@ -168,10 +167,10 @@ char **handle_array(char *res, int *max_len) {
 	return arr;
 }
 
-hashmap *read_headers(char *header_str, int *header_end) {
+hashmap *read_headers(char *header_str, void (*print_key)(void *), int *header_end) {
 	int past_lines = 0;
 
-	hashmap *header_map = make__hashmap(0, NULL, destroyCharKey);
+	hashmap *header_map = make__hashmap(0, print_key, destroyCharKey);
 
 	// jump past HTTP: status line
 	while ((int) header_str[past_lines] != 10)
@@ -179,7 +178,7 @@ hashmap *read_headers(char *header_str, int *header_end) {
 
 	past_lines += 1;
 
-	// while the newline doesn't start with a newline
+	// while the newline doesn't start with a newline (heh)
 	// (double newline is end of header)
 	while ((int) header_str[past_lines] != 10) {
 		int *head_max = malloc(sizeof(int)), head_index = 0;

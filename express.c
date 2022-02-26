@@ -158,6 +158,152 @@ void app_set(app app_t, char *route, char *descript) {
 }
 
 
+/* HEADER PARSER 
+	This handles taking in a header like:
+
+	GET / HTTP/1.1
+	Host: localhost:8888
+	User-Agent: Firefox/91.0
+	Accept: text/html
+	Connection: keep-alive
+
+	and creating a generalized form using a hashmap so you can do:
+
+	get__hashmap(header_map, "Host") and receive "localhost:8888" in return
+
+	-- along with this portion, there is also a map for the query (if the request url
+		is "/?name=Charlie"), which would look similar to the above:
+
+		get__hashmap(query_map, "name") and receive "Charlie" in return
+	-- also have a body (if the header has a body portion)
+*/
+void print_header(void *h) {
+	printf("**** %s\n", (char *) h);
+}
+
+typedef struct HeaderMap {
+	char *type; // request type
+	char *url; // request url
+
+	hashmap *meta_header_map;
+
+	hashmap *query_map;
+	hashmap *body_map;
+} map_header_t;
+
+/* assumes the form name=Charlie&age=18 etc. */
+int read_query(char *query) {
+	
+}
+
+int read_url(char *url, int *url_max, int url_index, char *header_str, map_header_t *mp_h) {
+	int read_char = 0;
+
+	int *query_key_max = malloc(sizeof(int)), query_key_index = 0,
+		*query_value_max = malloc(sizeof(int)), query_value_index = 0;
+	char *query_key = NULL, *query_value = NULL;
+	int read_key = 1;
+
+	while (header_str[read_char] != ' ') {
+		// if query_key is set, need to read values into the query_hashmap
+		if (query_key) {
+			if (header_str[read_char] == '&') {
+				insert__hashmap(mp_h->query_map, query_key, query_value, NULL, compareCharKey, deleteCharKey);
+
+				*query_key_max = 8; *query_value_max = 8;
+				query_key_index = 0; query_value_index = 0;
+
+				query_key = malloc(sizeof(char) * *query_key_max);
+				query_value = malloc(sizeof(char) * *query_value_max);
+
+				read_key = 1;
+			} else if (header_str[read_char] == '=')
+				read_key = 0;
+			else {
+				if (read_key) {
+					query_key[query_key_index++] = header_str[read_char];
+
+					query_key = resize_array(query_key, query_key_max, query_key_index, sizeof(char));
+				} else {
+					query_value[query_value_index++] = header_str[read_char];
+
+					query_value = resize_array(query_value, query_value_max, query_value_index, sizeof(char));
+				}
+			}
+		}
+
+		// update has query to true
+		if (header_str[read_line] == '?') {
+			has_query = 1;
+
+			mp_h->query_map = make__hashmap(0, print_header, deleteCharKey);
+
+			query_key = malloc(sizeof(char) * *query_key_max);
+			query_value = malloc(sizeof(char) * *query_value_max);
+		}
+
+		url[url_index++] = header_str[read_line];
+
+		url = resize_array(url, url_max, url_index, sizeof(char));
+	}
+
+	free(query_key_max);
+	free(query_value_max);
+
+	return url_index + 1;
+}
+
+map_header_t *read_headers(char *header_str, int header_length) {
+	map_header_t *mp_h = malloc(sizeof(map_header_t));
+
+	// start with first line (special):
+	// GET / HTTP/1.1
+	// get the request type and url
+	int *type_max = malloc(sizeof(int)), type_index = 0; *type_max = 8;
+	char *type = malloc(sizeof(char) * *type_max);
+	int *url_max = malloc(sizeof(int)), url_index = 0; *url_max = 8;
+	char *url = malloc(sizeof(char) * *url_max);
+	int *http_status_max = malloc(sizeof(int)), http_status_index = 0; *http_status_max = 8;
+	char *http_status = malloc(sizeof(char) * *http_status_max);
+	char *http_key = malloc(sizeof(char) * 5);
+	strcpy(http_key, "http");
+
+	int read_line = 0, curr_step = 0, has_query = 0;
+	// curr_step moves with which part we should add to:
+	// 0 for the request type
+	// 1 for the url type
+	// 2 for the http_status
+
+	// has_query enables the query hashmap
+	while (header_str[read_line] != '\n') {
+		if (curr_step == 0) {
+			type[type_index++] = header_str[read_line];
+
+			type = resize_array(type, type_max, type_index, sizeof(char));
+		} else if (curr_step == 1) {
+			read_line += read_url(url, url_max, url_index, header_str + sizeof(char) * read_line, mp_h);
+		} else {
+			http_status[http_status_index++] = header_str[read_line];
+
+			http_status = resize_array(http_status, http_status_max, http_status_index, sizeof(char));
+		}
+
+		read_line++;
+		curr_step += header_str[read_line] == ' ' ? 1 : 0;
+	}
+
+	mp_h->type = type;
+	mp_h->url = url;
+
+	read_line++;
+
+	// read the headers:
+	int *header_end_pos = malloc(sizeof(int)); // for then checking the body
+	mp_h->meta_header_map = read_headers(header_str, print_header, header_end_pos);
+
+	// if the type matches, read all of the 
+}
+
 typedef struct ConnectionHandle {
 	int p_handle; // socket specific pointer
 
@@ -180,16 +326,15 @@ void *connection(void *app_ptr) {
 
 	// make a continuous loop for new_fd while they are still alive
 	// as well as checking that the server is running
-	while (recv_res = recv(new_fd, buffer, buffer_len, 0) && app_t.server_open) {
+	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t.server_open) {
 		if (recv_res == -1) {
 			perror("receive: ");
 			continue;
 		}
 
-		if (recv_res == 0) break;
-
-		// otherwise we have data!
-		printf("%s\n", buffer);
+		// otherwise parse header data
+		printf("%d\n %s\n", recv_res, buffer);
+		read_headers(buffer, recv_res / sizeof(char));
 	}
 
 	// if the close occurs due to thread_status, send an error page
