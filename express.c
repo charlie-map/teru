@@ -161,28 +161,83 @@ void app_set(app app_t, char *route, char *descript) {
 	return;
 }
 
-void data_send(hashmap *status_code, int sock, int status, char *err_msg) {
-	int bytes_sent = 0;
-	int err_msg_len = err_msg ? strlen(err_msg) : 0;
+/*
+	options:
+		-- SENDING DATA
+			-t for simple text/plain -- expects a single char * (for data) in the overload
+			-h for text/html; charset=UTF-8
+				-- expects a char * (for data) and an int (length of char *) in the overload
+			-hc for text/html; charset=?
+				-- expects a char * (for data) and an int (length of char *)
+					and a char * (for charset) in the overload
+		-- ADDITIONAL HEADER OPTIONS:
+			-o for adding another parameter
+				-- expects a char * for the header name and a char *
+					for the header value
+*/
+void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
+	// create initial hashmap
 	hashmap *headers = make__hashmap(0, NULL, NULL);
 	insert__hashmap(headers, "Access-Control-Allow-Origin", "*", "", compareCharKey, NULL);
 	insert__hashmap(headers, "Connection", "Keep-Alive", "", compareCharKey, NULL);
 	
-	char *msg_len_len;
-	if (err_msg_len) {
-		insert__hashmap(headers, "Content-Type", "text/plain", "", compareCharKey, NULL);
-		msg_len_len = malloc(sizeof(char) * ((int) log10(err_msg_len) + 2));
-		sprintf(msg_len_len, "%d", err_msg_len);
-		insert__hashmap(headers, "Content-Length", msg_len_len, "", compareCharKey, NULL);
+	va_list read_opts;
+	va_start(read_opts, options);
+
+	char *data = NULL, content_type = NULL;
+	int data_length = 0;
+	for (int check_option = 0; options[check_option]; check_option++) {
+		if (options[check_option] != '-')
+			continue;
+
+		if (options[check_option + 1] == 't') {
+			insert__hashmap(headers, "Content-Type", "text/plain", "", compareCharKey, NULL);
+
+			data = va_arg(read_opts, char *);
+			data_length = strlen(data);
+		} else if (options[check_option + 1] == 'h') {
+			// start with default values
+			char *html_option = va_arg(read_opts, char *);
+			data_length = va_arg(read_opts, int);
+
+			char *char_set = NULL;
+			content_type = malloc(sizeof(char) * 20);
+			strcpy(content_type, "text/html; charset=");
+
+			if (options[check_option + 2] == 'c') {
+				char_set = va_arg(read_opts, char *);
+
+				content_type = realloc(content_type, sizeof(char) * (20 + strlen(char_set)));
+				strcat(content_type, char_set);
+			}
+
+			insert__hashmap(headers, "Content-Type", content_type, "", compareCharKey, NULL);
+		} else if (options[check_option + 1] == 'o') {
+			char *new_header_name = va_arg(read_opts, char *);
+			char *new_header_value = va_arg(read_opts, char *);
+
+			insert__hashmap(headers, new_header_name, new_header_value, "", compareCharKey, NULL);
+		}
+	}
+
+	char *lengthOf_data_length = NULL;
+	if (data_length) {
+		lengthOf_data_length = malloc(sizeof(char) * ((int) log10(data_length) + 2));
+		sprintf(lengthOf_data_length, "%d", data_length);
+		insert__hashmap(headers, "Content-Length", lengthOf_data_length, "", compareCharKey, NULL);
 	}
 
 	int *head_msg_len = malloc(sizeof(int));
-	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, err_msg_len, err_msg);
+	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, message);
 
+	int bytes_sent = 0;
 	while ((bytes_sent = send(sock, err_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
 
-	if (err_msg_len) free(msg_len_len);
-	free(headers);
+	if (message_len) free(msg_len_len);
+	if (lengthOf_data_length) free(lengthOf_data_length);
+	if (content_type) free(content_type);
+
+	deepdestroy__hashmap(headers);
 	return;
 }
 
@@ -422,7 +477,7 @@ void *connection(void *app_ptr) {
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			data_send(app_t.status_code, new_fd, 404, err_msg);
+			data_send(new_fd, app_t.status_code, 404, "-t", err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -441,7 +496,7 @@ void *connection(void *app_ptr) {
 		if (find_handle == handler->payload__length) { /* not found -- ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			data_send(app_t.status_code, new_fd, 404, err_msg);
+			data_send(new_fd, app_t.status_code, 404, "-t", err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -500,18 +555,17 @@ void *acceptor_function(void *app_ptr) {
 
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
-	int full_fpath_len = strlen(res.__dirname) + strlen(name) + 6;
+	int full_fpath_len = strlen(res.__dirname) + strlen(name) + 1;
 	char *full_fpath = malloc(sizeof(char) * full_fpath_len);
 	strcpy(full_fpath, res.__dirname);
 	strcat(full_fpath, name);
-	strcat(full_fpath, ".html");
 
 	FILE *f_pt = fopen(full_fpath, "r");
 
 	if (!f_pt) {
 		char *err_msg = malloc(sizeof(char) * (29 + full_fpath_len));
 		sprintf(err_msg, "No such file or directory, \'%s\'", full_fpath);
-		data_send(res.status_code, res.socket, 418, err_msg);
+		data_send(res.socket, res.status_code, 404, "-t", err_msg);
 		free(err_msg);
 
 		return 1;
@@ -536,8 +590,7 @@ int res_sendFile(res_t res, char *name) {
 	}
 
 	free(read_line);
-	printf("curr_data %d %s\n", full_data_index, full_data);
-	data_send(res.status_code, res.socket, 200, full_data);
+	data_send(res.socket, res.status_code, 200, "-h", full_data, full_data_index);
 	return 0;
 }
 
