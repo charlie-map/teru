@@ -12,6 +12,8 @@
 		Any functions basically just alter whatever is in here
 */
 struct Express {
+	struct Express *app_ptr;
+
 	hashmap *status_code; // holds the code -> textual phrase pair
 	// routes for different request types (currently on GET and POST)
 	hashmap *routes;
@@ -53,12 +55,12 @@ typedef struct ResStruct {
 // used for creating a new listener to attach to the app
 typedef struct Express app;
 
-app *express();
-void app_use(app *app_t, char *route, char *descript);
-void app_set(app *app_t, char *route, char *descript);
+app express();
+void app_use(app app_t, char *route, char *descript);
+void app_set(app app_t, char *route, char *descript);
 
-int app_get(app *app_t, char *endpoint, void (*handler)(req_t, res_t));
-int app_post(app *app_t, char *endpoint, void (*handler)(req_t, res_t));
+int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t));
+int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t));
 /* more route types to come if necessary */
 
 int res_sendFile(res_t res, char *name);
@@ -67,6 +69,6 @@ int res_end(res_t res, char *name);
 char *req_query(req_t req, char *name);
 char *req_body(req_t req, char *name);
 
-int app_listen(char *HOST, char *PORT, app *app_t);
+int app_listen(char *HOST, char *PORT, app app_t);
 
 #endif

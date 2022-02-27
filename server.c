@@ -20,7 +20,7 @@ void home_page(req_t req, res_t res) {
 	printf("name is %s\n", name);
 
 	printf("%d %s\n", res.socket, res.__dirname);
-	res_sendFile(res, "test");
+	res_sendFile(res, "home");
 
 	printf("end\n");
 
@@ -28,7 +28,7 @@ void home_page(req_t req, res_t res) {
 }
 
 int main() {
-	app *new_server = express();
+	app new_server = express();
 
 	char *setup_public_dir = malloc(sizeof(char) * PATH_MAX);
 	if (!getcwd(setup_public_dir, sizeof(char) * PATH_MAX)) {

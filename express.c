@@ -58,8 +58,10 @@ void print_app_settings(void *app_set) {
 
 
 /* setup an initial service */
-app *express() {
+app express() {
 	app *app_t = malloc(sizeof(app));
+
+	app_t->app_ptr = app_t;
 
 	app_t->status_code = make__hashmap(0, NULL, destroyCharKey);
 	batchInsert__hashmap(app_t->status_code, "request_code.data");
@@ -69,12 +71,12 @@ app *express() {
 
 	app_t->server_open = 1;
 
-	return app_t;
+	return *app_t;
 }
 
 void *acceptor_function(void *app_ptr);
 
-int app_listen(char *HOST, char *PORT, app *app_t) {
+int app_listen(char *HOST, char *PORT, app app_t) {
 	socket_t *socket = get_socket(HOST, PORT);
 
 	if (listen(socket->sock, BACKLOG) == -1) {
@@ -82,11 +84,11 @@ int app_listen(char *HOST, char *PORT, app *app_t) {
 		return 1;
 	}
 
-	app_t->socket = socket;
+	app_t.app_ptr->socket = socket;
 
 	// start acceptor thread
 	pthread_t accept_thread;
-	int check = pthread_create(&accept_thread, NULL, &acceptor_function, app_t);
+	int check = pthread_create(&accept_thread, NULL, &acceptor_function, app_t.app_ptr);
 
 	printf("server go vroom\n");
 
@@ -100,9 +102,9 @@ int app_listen(char *HOST, char *PORT, app *app_t) {
 /* ROUTE BUILDER -- POINTS TO GENERIC ROUTE BUILDER
 	|__ the only reason for these functions is to build a slightly
 		simpler interface on top of the library */
-int build_new_route(app *app_t, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
+int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
 	// check that the route doesn't exist (assumes the type matches)
-	hashmap__response *routes = (hashmap__response *) get__hashmap(app_t->routes, endpoint);
+	hashmap__response *routes = (hashmap__response *) get__hashmap(app_t.routes, endpoint);
 
 	for (int check_route = 0; routes && check_route < routes->payload__length; check_route) {
 		listen_t *r = (listen_t *) routes->payload[check_route];
@@ -121,45 +123,45 @@ int build_new_route(app *app_t, char *type, char *endpoint, void (*handler)(req_
 	// otherwise insert new listen_t
 	listen_t *r = new_listener(type, handler);
 
-	insert__hashmap(app_t->routes, endpoint, r, "", compareCharKey, NULL);
+	insert__hashmap(app_t.routes, endpoint, r, "", compareCharKey, NULL);
 
 	return 0;
 }
 
-int app_get(app *app_t, char *endpoint, void (*handler)(req_t, res_t)) {
+int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
 	return build_new_route(app_t, "GET", endpoint, handler);
 }
 
-int app_post(app *app_t, char *endpoint, void (*handler)(req_t, res_t)) {
+int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
 	return build_new_route(app_t, "POST", endpoint, handler);
 }
 
 /* EXPRESS APP SETTINGS BUILDER */
-void app_use(app *app_t, char *route, char *descript) {
+void app_use(app app_t, char *route, char *descript) {
 	// update route name to have a "use" at the beginning
 
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
 	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t->app_settings, new_route_name, descript, "", compareCharKey, NULL);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
 
 	return;
 }
 
-void app_set(app *app_t, char *route, char *descript) {
+void app_set(app app_t, char *route, char *descript) {
 	// update route name to have a "set" at the beginning
 
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
 	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t->app_settings, new_route_name, descript, "", compareCharKey, NULL);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
 
 	return;
 }
 
-void error_handle(hashmap *status_code, int sock, int status, char *err_msg) {
+void data_send(hashmap *status_code, int sock, int status, char *err_msg) {
 	int bytes_sent = 0;
 	int err_msg_len = err_msg ? strlen(err_msg) : 0;
 	hashmap *headers = make__hashmap(0, NULL, NULL);
@@ -177,11 +179,7 @@ void error_handle(hashmap *status_code, int sock, int status, char *err_msg) {
 	int *head_msg_len = malloc(sizeof(int));
 	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, err_msg_len, err_msg);
 
-	printf("%d %s\n", *head_msg_len, err_head_msg);
-	while ((bytes_sent = send(sock, err_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len) {
-		printf("%d --", bytes_sent);
-	}
-	printf("%d\n", bytes_sent);
+	while ((bytes_sent = send(sock, err_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
 
 	if (err_msg_len) free(msg_len_len);
 	free(headers);
@@ -400,8 +398,8 @@ typedef struct ConnectionHandle {
 void *connection(void *app_ptr) {
 
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
-	app *app_t = ((ch_t *) app_ptr)->app_t;
-	printf("%d %d with server %d\n", new_fd, app_t, app_t->server_open);
+	app app_t = *((ch_t *) app_ptr)->app_t;
+	printf("%d %d with server %d\n", new_fd, app_t, app_t.server_open);
 
 	int recv_res = 1;
 	char *buffer = malloc(sizeof(char) * MAXLINE);
@@ -409,7 +407,7 @@ void *connection(void *app_ptr) {
 
 	// make a continuous loop for new_fd while they are still alive
 	// as well as checking that the server is running
-	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t->server_open) {
+	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t.server_open) {
 		if (recv_res == -1) {
 			perror("receive: ");
 			continue;
@@ -420,11 +418,11 @@ void *connection(void *app_ptr) {
 
 		// using the new_request, acceess the app to see how to handle it:
 		printf("\nAPP ROUTE\n");
-		hashmap__response *handler = get__hashmap(app_t->routes, "/");
+		hashmap__response *handler = get__hashmap(app_t.routes, "/");
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			error_handle(app_t->status_code, new_fd, 404, err_msg);
+			data_send(app_t.status_code, new_fd, 404, err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -443,7 +441,7 @@ void *connection(void *app_ptr) {
 		if (find_handle == handler->payload__length) { /* not found -- ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			error_handle(app_t->status_code, new_fd, 404, err_msg);
+			data_send(app_t.status_code, new_fd, 404, err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -453,15 +451,13 @@ void *connection(void *app_ptr) {
 
 		// find handle will now have the handler within it
 		// can call the handler with the data
-		res_t res = { .socket = new_fd, .status_code = app_t->status_code, 
-					  .__dirname = (char *) get__hashmap(app_t->app_settings, "setviews") };
-		error_handle(app_t->status_code, new_fd, 200, "bigger and badder test\n");
-		break;
+		res_t res = { .socket = new_fd, .status_code = app_t.status_code, 
+					  .__dirname = (char *) get__hashmap(app_t.app_settings, "setviews") };
 		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
 	}
 
 	// if the close occurs due to thread_status, send an error page
-	if (!app_t->server_open);
+	if (!app_t.server_open);
 
 	close(new_fd);
 	free(buffer);
@@ -474,9 +470,9 @@ void *connection(void *app_ptr) {
 }
 
 void *acceptor_function(void *app_ptr) {
-	app *app_t = (app *) app_ptr;
+	app app_t = *(app *) app_ptr;
 
-	int sock_fd = app_t->socket->sock;
+	int sock_fd = app_t.socket->sock;
 	int new_fd;
 	char s[INET6_ADDRSTRLEN];
 	struct sockaddr_storage their_addr; // connector's address information
@@ -493,7 +489,7 @@ void *acceptor_function(void *app_ptr) {
 		// at this point we can send the user into their own thread
 		ch_t *new_thread_data = malloc(sizeof(ch_t));
 		new_thread_data->p_handle = new_fd;
-		new_thread_data->app_t = app_t;
+		new_thread_data->app_t = app_t.app_ptr;
 		pthread_t socket;
 		pthread_create(&socket, NULL, &connection, new_thread_data);
 	}
@@ -504,12 +500,6 @@ void *acceptor_function(void *app_ptr) {
 
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
-	printf("%d %s\n", res.socket, name);
-
-	error_handle(res.status_code, res.socket, 200, "fck\n");
-
-	return 0;
-
 	int full_fpath_len = strlen(res.__dirname) + strlen(name) + 6;
 	char *full_fpath = malloc(sizeof(char) * full_fpath_len);
 	strcpy(full_fpath, res.__dirname);
@@ -519,15 +509,35 @@ int res_sendFile(res_t res, char *name) {
 	FILE *f_pt = fopen(full_fpath, "r");
 
 	if (!f_pt) {
-		// char *err_msg = malloc(sizeof(char) * (29 + full_fpath_len));
-		// sprintf(err_msg, "No such file or directory, \'%s\'", full_fpath);
-		error_handle(res.status_code, res.socket, 418, "fck\n");
-		//free(err_msg);
+		char *err_msg = malloc(sizeof(char) * (29 + full_fpath_len));
+		sprintf(err_msg, "No such file or directory, \'%s\'", full_fpath);
+		data_send(res.status_code, res.socket, 418, err_msg);
+		free(err_msg);
 
 		return 1;
 	}
 
 	// if file opens, read from file to create a new request
+	size_t read_line_size = sizeof(char) * 64;
+	char *read_line = malloc(read_line_size);
+
+	int *full_data_max = malloc(sizeof(int)), full_data_index = 0;
+	*full_data_max = 64;
+	char *full_data = malloc(sizeof(char) * *full_data_max);
+	full_data[0] = '\0';
+
+	int curr_line_len = 0;
+	while ((curr_line_len = getline(&read_line, &read_line_size, f_pt)) != -1) {
+		full_data_index += curr_line_len;
+		full_data = resize_array(full_data, full_data_max, full_data_index + 1, sizeof(char));
+
+		strcat(full_data, read_line);
+		full_data[full_data_index] = '\0';
+	}
+
+	free(read_line);
+	printf("curr_data %d %s\n", full_data_index, full_data);
+	data_send(res.status_code, res.socket, 200, full_data);
 	return 0;
 }
 
