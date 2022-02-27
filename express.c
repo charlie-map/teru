@@ -1,9 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
 #include <math.h>
+
+// for closing everything:
+#include <signal.h>
 
 // all socket related packages
 #include <sys/types.h>
@@ -184,7 +188,7 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 	va_list read_opts;
 	va_start(read_opts, options);
 
-	char *data = NULL, content_type = NULL;
+	char *data = NULL, *content_type = NULL;
 	int data_length = 0;
 	for (int check_option = 0; options[check_option]; check_option++) {
 		if (options[check_option] != '-')
@@ -197,11 +201,12 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 			data_length = strlen(data);
 		} else if (options[check_option + 1] == 'h') {
 			// start with default values
-			char *html_option = va_arg(read_opts, char *);
+			data = va_arg(read_opts, char *);
 			data_length = va_arg(read_opts, int);
+			char *html_option = va_arg(read_opts, char *);
 
 			char *char_set = NULL;
-			content_type = malloc(sizeof(char) * 20);
+			content_type = malloc(sizeof(char) * 25);
 			strcpy(content_type, "text/html; charset=");
 
 			if (options[check_option + 2] == 'c') {
@@ -209,7 +214,8 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 
 				content_type = realloc(content_type, sizeof(char) * (20 + strlen(char_set)));
 				strcat(content_type, char_set);
-			}
+			} else
+				strcat(content_type, "UTF-8");
 
 			insert__hashmap(headers, "Content-Type", content_type, "", compareCharKey, NULL);
 		} else if (options[check_option + 1] == 'o') {
@@ -228,12 +234,12 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 	}
 
 	int *head_msg_len = malloc(sizeof(int));
-	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, message);
+	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, data);
 
 	int bytes_sent = 0;
 	while ((bytes_sent = send(sock, err_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
 
-	if (message_len) free(msg_len_len);
+	free(head_msg_len);
 	if (lengthOf_data_length) free(lengthOf_data_length);
 	if (content_type) free(content_type);
 

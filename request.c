@@ -116,8 +116,9 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 
 	free(key_num);
 
+	int add_on = 0;
 	if (post_data) {
-		int add_on = strlen(post_data) + 3;
+		add_on = strlen(post_data) + 3;
 		header = resize_array(header, header_max, header_index + add_on, sizeof(char));
 
 		sprintf(header + sizeof(char) * header_index, "\n\n%s\0", post_data);
