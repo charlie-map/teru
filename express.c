@@ -168,6 +168,7 @@ void error_handle(hashmap *status_code, int sock, int status, char *err_msg) {
 	
 	char *msg_len_len;
 	if (err_msg_len) {
+		insert__hashmap(headers, "Content-Type", "text/plain", "", compareCharKey, NULL);
 		msg_len_len = malloc(sizeof(char) * ((int) log10(err_msg_len) + 2));
 		sprintf(msg_len_len, "%d", err_msg_len);
 		insert__hashmap(headers, "Content-Length", msg_len_len, "", compareCharKey, NULL);
@@ -415,10 +416,7 @@ void *connection(void *app_ptr) {
 		}
 
 		// otherwise parse header data
-		printf("%s\n", buffer);
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
-
-		error_handle(app_t->status_code, new_fd, 200, "fck\n");
 
 		// using the new_request, acceess the app to see how to handle it:
 		printf("\nAPP ROUTE\n");
@@ -457,6 +455,8 @@ void *connection(void *app_ptr) {
 		// can call the handler with the data
 		res_t res = { .socket = new_fd, .status_code = app_t->status_code, 
 					  .__dirname = (char *) get__hashmap(app_t->app_settings, "setviews") };
+		error_handle(app_t->status_code, new_fd, 200, "bigger and badder test\n");
+		break;
 		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
 	}
 

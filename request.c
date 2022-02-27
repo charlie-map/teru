@@ -93,11 +93,11 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	char *status_char = malloc(sizeof(char) * 4);
 	sprintf(status_char, "%d", STATUS);
 	char *status_phrase = (char *) get__hashmap(status_code, status_char);
-	int status_phrase_len = strlen(status_phrase);
+	int status_phrase_len = strlen(status_char) + strlen(status_phrase);
 
-	header_index = status_phrase_len + 5;
+	header_index = status_phrase_len + 11;
 	header = resize_array(header, header_max, header_index, sizeof(char));
-	sprintf(header, "%s %s\n", status_char, status_phrase);
+	sprintf(header, "HTTP/1.1 %s %s\n", status_char, status_phrase);
 
 	// read all content response headers
 	int *key_num = malloc(sizeof(int));
@@ -107,7 +107,7 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 		char *header_value = (char *) get__hashmap(headers, header_key[cp_header]);
 
 		int head_add_on = strlen(header_key[cp_header]) + strlen(header_value) + 3;
-		header = resize_array(header, header_max, header_index + head_add_on, sizeof(char));
+		header = resize_array(header, header_max, header_index + head_add_on + 4, sizeof(char));
 		sprintf(header + sizeof(char) * header_index, "%s: %s\n", header_key[cp_header], header_value);
 
 		header_index += head_add_on;
