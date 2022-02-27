@@ -85,33 +85,42 @@ char *build_url(char *request_url, int *req_length, char *query_param, char **at
 	return full_request;
 }
 
-char *create_header(char *HOST, char *PORT, char *request_url, int *url_length, char *post_data) {
-	int host_length = strlen(HOST);
-	char *build_host = malloc(sizeof(char) * (host_length + strlen(PORT) + 2));
-	memset(build_host, '\0', host_length + strlen(PORT) + 2);
+char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size, char *post_data) {
+	int header_size;
+	int header_index = 0; *header_max = 32;
+	char *header = malloc(sizeof(char) * *header_max);
 
-	strcpy(build_host, HOST);
-	build_host[host_length] = ':';
-	strcat(build_host, PORT);
+	char *status_char = malloc(sizeof(char) * 4);
+	sprintf(status_char, "%d", STATUS);
+	char *status_phrase = (char *) get__hashmap(status_code, status_char);
+	int status_phrase_len = strlen(status_phrase);
 
-	// calculate header length
-	int post_data_len = post_data ? strlen(post_data) : 0;
+	header_index = status_phrase_len + 6;
+	header = resize_array(header, header_max, header_index, sizeof(char));
+	sprintf(header, "%s %s\n", status_char, status_phrase);
 
-	// calculate how many digits the post_data_len is:
-	int content_number = 1, content_number_calculator = post_data_len;
-	if (post_data_len >= 100) { content_number += 2; content_number_calculator /= 100; }
-	if (post_data_len >= 10) { content_number += 1; content_number_calculator /= 10; }
+	// read all content response headers
+	int *key_num = malloc(sizeof(int));
+	char **header_key = (char **) keys__hashmap(headers, key_num);
 
-	*url_length = 69 + (post_data ? 24 + post_data_len : 0) + *url_length + strlen(build_host) + content_number;
+	for (int cp_header = 0; cp_header < *key_num; cp_header++) {
+		char *header_value = (char *) get__hashmap(headers, header_key[cp_header]);
 
-	char *header = malloc(sizeof(char) * (*url_length + 1));
+		header_index += strlen(header_key[cp_header]) + strlen(header_value) + 4;
+		header = resize_array(header, header_max, header_index, sizeof(char));
+		sprintf(header, "%s: %s\n", header_key[cp_header], header_value);
 
-	sprintf(header, "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
-		post_data ? "POST" : "GET", request_url, build_host, (post_data ?
-		"application/x-www-form-urlencoded" : "text/plain"), post_data_len, post_data ? post_data : "");
+		header[header_index] = '\0';
+	}
 
-	free(build_host);
+	free(key_num);
 
+	int add_on = strlen(post_data) + 3;
+	header = resize_array(header, header_max, header_index + add_on, sizeof(char));
+
+	sprintf(header, "\n\n%s\0", post_data);
+
+	*header_max = header_index + add_on;
 	return header;
 }
 

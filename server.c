@@ -9,6 +9,7 @@
 #include "express.h"
 #include "request.h"
 
+#define HOST "localhost"
 #define PORT "8888"
 #define PATH_MAX 200
 
@@ -18,11 +19,16 @@ void home_page(req_t req, res_t res) {
 	char *name = req_query(req, "name");
 	printf("name is %s\n", name);
 
+	printf("%d %s\n", res.socket, res.__dirname);
+	res_sendFile(res, "test");
+
+	printf("end\n");
+
 	return;
 }
 
 int main() {
-	app new_server = express();
+	app *new_server = express();
 
 	char *setup_public_dir = malloc(sizeof(char) * PATH_MAX);
 	if (!getcwd(setup_public_dir, sizeof(char) * PATH_MAX)) {
@@ -45,7 +51,7 @@ int main() {
 	// setup listener routes
 	app_get(new_server, "/", home_page);
 
-	int status = app_listen(PORT, new_server);
+	int status = app_listen(HOST, PORT, new_server);
 
 	return 0;
 }

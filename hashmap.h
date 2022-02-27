@@ -19,6 +19,7 @@ int delete__hashmap(hashmap *hash__m, void *key);
 
 int deepdestroy__hashmap(hashmap *hash);
 
+int batchInsert__hashmap(hashmap *hash__m, char *filename);
 int insert__hashmap(hashmap *hash__m, void *key, void *value, ...);
 
 // simple key type functions
