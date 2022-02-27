@@ -59,6 +59,9 @@ int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t));
 int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t));
 /* more route types to come if necessary */
 
+char *req_query(req_t req, char *name);
+char *req_body(req_t req, char *name);
+
 int app_listen(char *PORT, app app_t);
 
 #endif

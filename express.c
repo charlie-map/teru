@@ -119,7 +119,7 @@ int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t
 	// otherwise insert new listen_t
 	listen_t *r = new_listener(type, handler);
 
-	insert__hashmap(app_t.routes, endpoint, r, printCharKey, compareCharKey, NULL);
+	insert__hashmap(app_t.routes, endpoint, r, "", compareCharKey, NULL);
 
 	return 0;
 }
@@ -140,7 +140,7 @@ void app_use(app app_t, char *route, char *descript) {
 	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
 
 	return;
 }
@@ -152,12 +152,41 @@ void app_set(app app_t, char *route, char *descript) {
 	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
 
 	return;
 }
 
 
+void error_handle(int sock, char *err_msg) {
+	int bytes_sent;
+	int err_msg_len = strlen(err_msg);
+
+	while ((bytes_sent = send(sock, err_msg, err_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * err_msg_len);
+
+	return;
+}
+
+void destroy_req_t(req_t *r) {
+	free(r->type);
+	free(r->url);
+
+	if (r->meta_header_map)
+		deepdestroy__hashmap(r->meta_header_map);
+
+	if (r->query_map)
+		deepdestroy__hashmap(r->query_map);
+	if (r->body_map)
+		deepdestroy__hashmap(r->body_map);
+
+	free(r);
+
+	return;
+}
+
+void destroy_res_t(res_t *r) {
+	/* NEEDS UPDATING */
+}
 /* HEADER PARSER 
 	This handles taking in a header like:
 
@@ -186,6 +215,8 @@ int read_query(char *query, int curr_point, hashmap *header_ptr) {
 	// setup key and value pointers
 	int *query_key_max = malloc(sizeof(int)), query_key_index = 0,
 		*query_value_max = malloc(sizeof(int)), query_value_index = 0;
+	*query_key_max = 8;
+	*query_value_max = 8;
 
 	char *query_key = malloc(sizeof(char) * *query_key_max),
 		 *query_value = malloc(sizeof(char) * *query_value_max);
@@ -193,7 +224,7 @@ int read_query(char *query, int curr_point, hashmap *header_ptr) {
 
 	while (query[curr_point] != ' ') {
 		if (query[curr_point] == '&') {
-			insert__hashmap(header_ptr, query_key, query_value, NULL, compareCharKey, destroyCharKey);
+			insert__hashmap(header_ptr, query_key, query_value, "", compareCharKey, destroyCharKey);
 
 			*query_key_max = 8; *query_value_max = 8;
 			query_key_index = 0; query_value_index = 0;
@@ -206,26 +237,32 @@ int read_query(char *query, int curr_point, hashmap *header_ptr) {
 
 		if (query[curr_point] == '=') {
 			read_key = 0;
+			curr_point++;
 			continue;
 		}
 
 		if (read_key) {
 			query_key[query_key_index++] = query[curr_point];
 
-			query_key = resize_array(query_key, query_key_max, query_key_index, sizeof(char));
+			query_key = resize_array(query_key, query_key_max, query_key_index + 1, sizeof(char));
+			query_key[query_key_index] = '\0';
 		} else {
 			query_value[query_value_index++] = query[curr_point];
 
-			query_value = resize_array(query_value, query_value_max, query_value_index, sizeof(char));
+			query_value = resize_array(query_value, query_value_max, query_value_index + 1, sizeof(char));
+			query_value[query_value_index] = '\0';
 		}
 
 		curr_point++;
 	}
 
+	if (query_key_index > 0 && query_value_index > 0)
+		insert__hashmap(header_ptr, query_key, query_value, "", compareCharKey, destroyCharKey);
+
 	free(query_key_max);
 	free(query_value_max);
 
-	return curr_point;
+	return curr_point + 1;
 }
 
 int read_url(char **url, int *url_max, int url_index, char *header_str, req_t *mp_h) {
@@ -322,6 +359,14 @@ req_t *read_header_helper(char *header_str, int header_length) {
 	return mp_h;
 }
 
+char *req_query(req_t req, char *name) {
+	return (char *) get__hashmap(req.query_map, name);
+}
+
+char *req_body(req_t req, char *name) {
+	return (char *) get__hashmap(req.body_map, name);
+}
+
 typedef struct ConnectionHandle {
 	int p_handle; // socket specific pointer
 
@@ -332,7 +377,6 @@ typedef struct ConnectionHandle {
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
 // Beej Hall websockets (http://beej.us/guide/bgnet/html/)
 void *connection(void *app_ptr) {
-	printf("new connnection\n");
 
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
 	app app_t = *((ch_t *) app_ptr)->app_t;
@@ -356,7 +400,14 @@ void *connection(void *app_ptr) {
 		// using the new_request, acceess the app to see how to handle it:
 		hashmap__response *handler = get__hashmap(app_t.routes, new_request->url);
 		if (!handler) { /* ERROR HANDLE */
-			
+			char *err_msg = malloc(sizeof(char) * (9 + strlen(new_request->type) + strlen(new_request->url)));
+			sprintf(err_msg, "Cannot %s %s", new_request->type, new_request->url);
+			error_handle(new_fd, err_msg);
+			free(err_msg);
+
+			destroy_req_t(new_request);
+
+			break;
 		}
 
 		// there might be multiple (aka "/number" is a POST and a GET)
@@ -368,9 +419,17 @@ void *connection(void *app_ptr) {
 		}
 
 		if (find_handle == handler->payload__length) { /* not found -- ERROR HANDLE */
+			char *err_msg = malloc(sizeof(char) * (9 + strlen(new_request->type) + strlen(new_request->url)));
+			sprintf(err_msg, "Cannot %s %s", new_request->type, new_request->url);
+			error_handle(new_fd, err_msg);
+			free(err_msg);
 
+			destroy_req_t(new_request);
+
+			break;
 		}
 
+		printf("%d\n", new_request->query_map);
 		// find handle will now have the handler within it
 		// can call the handler with the data
 		res_t test;
@@ -407,7 +466,6 @@ void *acceptor_function(void *app_ptr) {
 			continue;
 		}
 
-		printf("new socket %d\n", new_fd);
 		// at this point we can send the user into their own thread
 		ch_t *new_thread_data = malloc(sizeof(ch_t));
 		new_thread_data->p_handle = new_fd;

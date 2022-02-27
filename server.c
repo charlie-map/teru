@@ -14,7 +14,9 @@
 
 void home_page(req_t req, res_t res) {
 	printf("received request %s %s\n", req.url, req.type);
-	
+
+	char *name = req_query(req, "name");
+	printf("name is %s\n", name);
 
 	return;
 }
