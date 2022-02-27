@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
+#include <math.h>
 
 // all socket related packages
 #include <sys/types.h>
@@ -160,9 +161,17 @@ void app_set(app *app_t, char *route, char *descript) {
 
 void error_handle(hashmap *status_code, int sock, int status, char *err_msg) {
 	int bytes_sent = 0;
-	int err_msg_len = strlen(err_msg);
+	int err_msg_len = err_msg ? strlen(err_msg) : 0;
 	hashmap *headers = make__hashmap(0, NULL, NULL);
-	insert__hashmap(headers, "Access-Control-Allow-Origin", "*");
+	insert__hashmap(headers, "Access-Control-Allow-Origin", "*", "", compareCharKey, NULL);
+	insert__hashmap(headers, "Connection", "Keep-Alive", "", compareCharKey, NULL);
+	
+	char *msg_len_len;
+	if (err_msg_len) {
+		msg_len_len = malloc(sizeof(char) * ((int) log10(err_msg_len) + 2));
+		sprintf(msg_len_len, "%d", err_msg_len);
+		insert__hashmap(headers, "Content-Length", msg_len_len, "", compareCharKey, NULL);
+	}
 
 	int *head_msg_len = malloc(sizeof(int));
 	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, err_msg_len, err_msg);
@@ -173,6 +182,8 @@ void error_handle(hashmap *status_code, int sock, int status, char *err_msg) {
 	}
 	printf("%d\n", bytes_sent);
 
+	if (err_msg_len) free(msg_len_len);
+	free(headers);
 	return;
 }
 

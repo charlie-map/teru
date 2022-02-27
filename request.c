@@ -95,7 +95,7 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	char *status_phrase = (char *) get__hashmap(status_code, status_char);
 	int status_phrase_len = strlen(status_phrase);
 
-	header_index = status_phrase_len + 6;
+	header_index = status_phrase_len + 5;
 	header = resize_array(header, header_max, header_index, sizeof(char));
 	sprintf(header, "%s %s\n", status_char, status_phrase);
 
@@ -106,10 +106,11 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	for (int cp_header = 0; cp_header < *key_num; cp_header++) {
 		char *header_value = (char *) get__hashmap(headers, header_key[cp_header]);
 
-		header_index += strlen(header_key[cp_header]) + strlen(header_value) + 4;
-		header = resize_array(header, header_max, header_index, sizeof(char));
-		sprintf(header, "%s: %s\n", header_key[cp_header], header_value);
+		int head_add_on = strlen(header_key[cp_header]) + strlen(header_value) + 3;
+		header = resize_array(header, header_max, header_index + head_add_on, sizeof(char));
+		sprintf(header + sizeof(char) * header_index, "%s: %s\n", header_key[cp_header], header_value);
 
+		header_index += head_add_on;
 		header[header_index] = '\0';
 	}
 
@@ -118,7 +119,7 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	int add_on = strlen(post_data) + 3;
 	header = resize_array(header, header_max, header_index + add_on, sizeof(char));
 
-	sprintf(header, "\n\n%s\0", post_data);
+	sprintf(header + sizeof(char) * header_index, "\n\n%s\0", post_data);
 
 	*header_max = header_index + add_on;
 	return header;
