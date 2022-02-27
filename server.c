@@ -13,7 +13,8 @@
 #define PATH_MAX 200
 
 void home_page(req_t req, res_t res) {
-	printf("received request\n");
+	printf("received request %s %s\n", req.url, req.type);
+	
 
 	return;
 }

@@ -35,9 +35,14 @@ struct Express {
 
 
 // basic req, res structures
-typedef struct ReqStruct {
-	char *url; // full url of request
-	char **query, **body; // any parameters involved
+typedef struct HeaderMap {
+	char *type; // request type
+	char *url; // request url
+
+	hashmap *meta_header_map;
+
+	hashmap *query_map;
+	hashmap *body_map;
 } req_t;
 typedef struct ResStruct {
 	char *end; // NOT DONE
