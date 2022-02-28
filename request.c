@@ -117,6 +117,7 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	}
 
 	free(key_num);
+	free(header_key);
 
 	int add_on = 0;
 	if (post_data) {

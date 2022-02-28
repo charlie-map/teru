@@ -39,6 +39,7 @@ struct Express {
 typedef struct HeaderMap {
 	char *type; // request type
 	char *url; // request url
+	char *http_stat; // request status
 
 	hashmap *meta_header_map;
 

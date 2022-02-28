@@ -249,15 +249,16 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 	}
 
 	int *head_msg_len = malloc(sizeof(int));
-	char *err_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, data);
+	char *main_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, data);
 
 	int bytes_sent = 0;
-	while ((bytes_sent = send(sock, err_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
+	while ((bytes_sent = send(sock, main_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
 
 	free(head_msg_len);
 	if (lengthOf_data_length) free(lengthOf_data_length);
 	if (content_type) free(content_type);
 
+	free(main_head_msg);
 	deepdestroy__hashmap(headers);
 	return;
 }
@@ -265,6 +266,7 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 void destroy_req_t(req_t *r) {
 	free(r->type);
 	free(r->url);
+	free(r->http_stat);
 
 	if (r->meta_header_map)
 		deepdestroy__hashmap(r->meta_header_map);
@@ -401,8 +403,9 @@ req_t *read_header_helper(char *header_str, int header_length) {
 	*url = malloc(sizeof(char) * *url_max);
 	int *http_status_max = malloc(sizeof(int)), http_status_index = 0; *http_status_max = 8;
 	char *http_status = malloc(sizeof(char) * *http_status_max);
-	char *http_key = malloc(sizeof(char) * 5);
-	strcpy(http_key, "http");
+	// I have no idea what these are anymore... just gonna comment em out
+	// char *http_key = malloc(sizeof(char) * 5);
+	// strcpy(http_key, "http");
 
 	int read_line = 0, curr_step = 0, has_query = 0;
 	// curr_step moves with which part we should add to:
@@ -435,7 +438,11 @@ req_t *read_header_helper(char *header_str, int header_length) {
 
 	mp_h->type = type;
 	mp_h->url = *url;
+	mp_h->http_stat = http_status;
 
+	free(type_max);
+	free(http_status_max);
+	free(url_max);
 	free(url);
 
 	read_line++;
@@ -451,6 +458,7 @@ req_t *read_header_helper(char *header_str, int header_length) {
 		read_query(header_str + sizeof(char) * *header_end_pos, 0, mp_h->body_map);
 	}
 
+	free(header_end_pos);
 	return mp_h;
 }
 
@@ -541,7 +549,7 @@ int join_all_threads(ch_t *curr) {
 		prev = curr;
 		curr = curr->next;
 
-		free(curr);
+		free(prev);
 	}
 
 	return 0;
@@ -582,6 +590,7 @@ void *connection(void *app_ptr) {
 			free(err_msg);
 
 			destroy_req_t(new_request);
+			free(handler);
 
 			break;
 		}
@@ -601,6 +610,7 @@ void *connection(void *app_ptr) {
 			free(err_msg);
 
 			destroy_req_t(new_request);
+			free(handler);
 
 			break;
 		}
@@ -610,6 +620,9 @@ void *connection(void *app_ptr) {
 		res_t res = { .socket = new_fd, .status_code = app_t.status_code, 
 					  .__dirname = (char *) get__hashmap(app_t.app_settings, "setviews") };
 		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
+	
+		destroy_req_t(new_request);
+		free(handler);
 	}
 
 	// if the close occurs due to thread_status, send an error page
@@ -684,8 +697,11 @@ int res_sendFile(res_t res, char *name) {
 		printf("\n** No such file or directory, \'%s\' **\n", full_fpath);
 		printf("\033[0;37m");
 
+		free(full_fpath);
 		return 1;
 	}
+
+	free(full_fpath);
 
 	// if file opens, read from file to create a new request
 	size_t read_line_size = sizeof(char) * 64;
@@ -706,7 +722,12 @@ int res_sendFile(res_t res, char *name) {
 	}
 
 	free(read_line);
+	fclose(f_pt);
+
 	data_send(res.socket, res.status_code, 200, "-h", full_data, full_data_index);
+	
+	free(full_data_max);
+	free(full_data);
 	return 0;
 }
 
