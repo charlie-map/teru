@@ -23,6 +23,14 @@
 
 #define MAXLINE 4096
 
+static volatile sig_atomic_t server_active = 1;
+/* closes all data */
+void SIG_CLOSEhandle(int sig) {
+	(void) sig;
+	printf("close program\n");
+	server_active = 0;
+}
+
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
 
@@ -78,7 +86,34 @@ app express() {
 	return *app_t;
 }
 
+void destroy_app(app *app_t) {
+	deepdestroy__hashmap(app_t->status_code);
+	deepdestroy__hashmap(app_t->routes);
+	deepdestroy__hashmap(app_t->app_settings);
+
+	free(app_t);
+
+	return;
+}
+
 void *acceptor_function(void *app_ptr);
+
+struct SIG_Data {
+	pthread_t main_thread;
+	int main_socket;
+};
+void *sigclose_all(void *sock) {
+	int socket = ((struct SIG_Data *) sock)->main_socket;
+
+	// wait for server to close
+	while (server_active);
+
+	shutdown(socket, SHUT_RDWR);
+
+	pthread_join(((struct SIG_Data *) sock)->main_thread, NULL);
+
+	return NULL;
+}
 
 int app_listen(char *HOST, char *PORT, app app_t) {
 	socket_t *socket = get_socket(HOST, PORT);
@@ -92,13 +127,23 @@ int app_listen(char *HOST, char *PORT, app app_t) {
 
 	// start acceptor thread
 	pthread_t accept_thread;
-	int check = pthread_create(&accept_thread, NULL, &acceptor_function, app_t.app_ptr);
+	pthread_create(&accept_thread, NULL, &acceptor_function, app_t.app_ptr);
 
 	printf("server go vroom\n");
 
-	while(getchar() != '0');
+	signal(SIGINT, SIG_CLOSEhandle);
+
+	// setup signal listener and closer
+	struct SIG_Data *sig_listener = malloc(sizeof(struct SIG_Data));
+	sig_listener->main_thread = accept_thread;
+	sig_listener->main_socket = socket->sock;
+
+	pthread_t closer_thread;
+	pthread_create(&closer_thread, NULL, &sigclose_all, sig_listener);
+	pthread_join(closer_thread, NULL);
 
 	destroy_socket(socket);
+	destroy_app(app_t.app_ptr);
 
 	return 0;
 }
@@ -448,10 +493,89 @@ char *req_body(req_t req, char *name) {
 }
 
 typedef struct ConnectionHandle {
+	pthread_t *thread;
+
 	int p_handle; // socket specific pointer
+	int is_complete; // check for if the thread has finished running
 
 	app *app_t; // all the meta data
+
+	struct ConnectionHandle *next; // keep track of current threads
 } ch_t;
+
+ch_t *build_new_thread(ch_t *head, int socket, app *app_t, pthread_t *thread) {
+	ch_t *new_thread = malloc(sizeof(ch_t));
+
+	new_thread->thread = thread;
+
+	new_thread->p_handle = socket;
+	new_thread->is_complete = 0;
+
+	new_thread->app_t = app_t;
+
+	// splice in at position 1 (instead of linearly searching for end of list)
+	ch_t *next = head->next;
+	head->next = new_thread;
+	new_thread->next = next;
+
+	return new_thread;
+}
+
+/* Loop through current threads and if there is an is_complete true,
+remove that thread */
+int check_dead_threads(ch_t *curr) {
+	ch_t *prev = curr;
+	curr = curr->next;
+
+	while (curr) {
+		if (curr->is_complete == 1) {
+			free(curr->thread);
+
+			// extract node
+			prev->next = curr->next;
+
+			prev = curr;
+			curr = curr->next;
+
+			free(curr);
+
+			continue;
+		}
+
+		prev = curr;
+		curr = curr->next;
+	}
+
+	return 0;
+}
+
+int join_all_threads(ch_t *curr) {
+	printf("REJOIN THREAD\n");
+
+	ch_t *prev = curr;
+	curr = curr->next;
+
+	while (curr) {
+		if (curr->is_complete == 1) {
+			free(curr->thread);
+
+			// extract node
+			prev->next = curr->next;
+		} else {
+
+			pthread_join(*curr->thread, NULL);
+
+			free(curr->thread);
+		}
+
+		prev = curr;
+		curr = curr->next;
+
+		free(curr);
+	}
+
+	return 0;
+}
 
 /* LISTENER FUNCTIONS FOR SOCKET */
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
@@ -468,7 +592,7 @@ void *connection(void *app_ptr) {
 
 	// make a continuous loop for new_fd while they are still alive
 	// as well as checking that the server is running
-	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t.server_open) {
+	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && server_active) {
 		if (recv_res == -1) {
 			perror("receive: ");
 			continue;
@@ -478,7 +602,6 @@ void *connection(void *app_ptr) {
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
 
 		// using the new_request, acceess the app to see how to handle it:
-		printf("\nAPP ROUTE\n");
 		hashmap__response *handler = get__hashmap(app_t.routes, "/");
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
@@ -518,7 +641,9 @@ void *connection(void *app_ptr) {
 	}
 
 	// if the close occurs due to thread_status, send an error page
-	if (!app_t.server_open);
+	if (!server_active) {
+		data_send(new_fd, app_t.status_code, 404, "-t", "Uh oh! The server is down... Try again in a bit.");
+	}
 
 	close(new_fd);
 	free(buffer);
@@ -539,7 +664,14 @@ void *acceptor_function(void *app_ptr) {
 	struct sockaddr_storage their_addr; // connector's address information
 	socklen_t sin_size;
 
-	while (1) {
+	ch_t *threads = malloc(sizeof(ch_t));
+	threads->next = NULL;
+
+	while (server_active) {
+		printf("%d\n", server_active);
+		// check threads for removal
+		check_dead_threads(threads);
+
 		sin_size = sizeof(their_addr);
 		new_fd = accept(sock_fd, (struct sockaddr *) &their_addr, &sin_size);
 		if (new_fd == -1) {
@@ -548,12 +680,17 @@ void *acceptor_function(void *app_ptr) {
 		}
 
 		// at this point we can send the user into their own thread
-		ch_t *new_thread_data = malloc(sizeof(ch_t));
-		new_thread_data->p_handle = new_fd;
-		new_thread_data->app_t = app_t.app_ptr;
-		pthread_t socket;
-		pthread_create(&socket, NULL, &connection, new_thread_data);
+		pthread_t *socket = malloc(sizeof(pthread_t));
+		ch_t *new_thread = build_new_thread(threads, new_fd, app_t.app_ptr, socket);
+
+		pthread_create(socket, NULL, &connection, new_thread);
 	}
+
+	printf("close threads\n");
+	// rejoin all active threads
+	join_all_threads(threads);
+
+	free(threads);
 
 	return NULL;
 }
@@ -573,6 +710,10 @@ int res_sendFile(res_t res, char *name) {
 		sprintf(err_msg, "No such file or directory, \'%s\'", full_fpath);
 		data_send(res.socket, res.status_code, 404, "-t", err_msg);
 		free(err_msg);
+
+		printf("\033[0;31m");
+		printf("\n** No such file or directory, \'%s\' **\n", full_fpath);
+		printf("\033[0;37m");
 
 		return 1;
 	}
