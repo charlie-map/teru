@@ -1,5 +1,5 @@
-#ifndef __EXPRESS_L__
-#define __EXPRESS_L__
+#ifndef __TERU_L__
+#define __TERU_L__
 
 #define BACKLOG 10
 
@@ -7,12 +7,12 @@
 #include "hashmap.h"
 
 /*
-	Express Struct:
+	Teru Struct:
 		This will handle pretty much everything
 		Any functions basically just alter whatever is in here
 */
-struct Express {
-	struct Express *app_ptr;
+typedef struct Teru {
+	struct Teru *app_ptr;
 
 	hashmap *status_code; // holds the code -> textual phrase pair
 	// routes for different request types (currently on GET and POST)
@@ -32,7 +32,7 @@ struct Express {
 
 	int server_active; // for evaluting if the server is trying to close
 	/* more to come! */
-};
+} teru_t;
 
 
 // basic req, res structures
@@ -53,15 +53,12 @@ typedef struct ResStruct {
 	char *__dirname;
 } res_t;
 
-// used for creating a new listener to attach to the app
-typedef struct Express app;
+teru_t teru();
+void app_use(teru_t app, char *route, ...);
+void app_set(teru_t app, char *route, ...);
 
-app express();
-void app_use(app app_t, char *route, ...);
-void app_set(app app_t, char *route, ...);
-
-int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t));
-int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t));
+int app_get(teru_t app, char *endpoint, void (*handler)(req_t, res_t));
+int app_post(teru_t app, char *endpoint, void (*handler)(req_t, res_t));
 /* more route types to come if necessary */
 
 int res_sendFile(res_t res, char *name);
@@ -70,6 +67,6 @@ int res_end(res_t res, char *data);
 char *req_query(req_t req, char *name);
 char *req_body(req_t req, char *name);
 
-int app_listen(char *HOST, char *PORT, app app_t);
+int app_listen(char *HOST, char *PORT, teru_t app);
 
 #endif

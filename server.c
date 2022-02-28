@@ -1,17 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
-#include <errno.h>
-#include <pthread.h>
-#include <unistd.h>
-
-#include "express.h"
-#include "request.h"
+#include "teru.h"
 
 #define HOST "localhost"
 #define PORT "8888"
-#define PATH_MAX 200
 
 void home_page(req_t req, res_t res) {
 	printf("received request %s %s\n", req.url, req.type);
@@ -27,19 +20,21 @@ void home_page(req_t req, res_t res) {
 
 void different_page(req_t req, res_t res) {
 	res_end(res, "Test send");
+
+	return;
 }
 
 int main() {
-	app new_server = express();
+	teru_t app = teru();
 
-	app_use(new_server, "/", getenv("PWD"), "/public/");
-	app_set(new_server, "views", getenv("PWD"), "/views/");
+	app_use(app, "/", getenv("PWD"), "/public/");
+	app_set(app, "views", getenv("PWD"), "/views/");
 
 	// setup listener routes
-	app_get(new_server, "/", home_page);
-	app_get(new_server, "/test", different_page);
+	app_get(app, "/", home_page);
+	app_get(app, "/test", different_page);
 
-	int status = app_listen(HOST, PORT, new_server);
+	int status = app_listen(HOST, PORT, app);
 
 	return 0;
 }

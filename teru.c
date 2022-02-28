@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include <netdb.h>
 
-#include "express.h"
+#include "teru.h"
 
 #define MAXLINE 4096
 
@@ -59,35 +59,35 @@ void print_app_settings(void *app_set) {
 
 
 /* setup an initial service */
-app express() {
-	app *app_t = malloc(sizeof(app));
+teru_t teru() {
+	teru_t *app = malloc(sizeof(teru_t));
 
-	app_t->app_ptr = app_t;
+	app->app_ptr = app;
 
-	app_t->status_code = make__hashmap(0, NULL, destroyCharKey);
-	batchInsert__hashmap(app_t->status_code, "request_code.data");
+	app->status_code = make__hashmap(0, NULL, destroyCharKey);
+	batchInsert__hashmap(app->status_code, "request_code.data");
 
-	app_t->routes = make__hashmap(1, print_listen_t, free_listen_t);
-	app_t->app_settings = make__hashmap(0, print_app_settings, destroyCharKey);
+	app->routes = make__hashmap(1, print_listen_t, free_listen_t);
+	app->app_settings = make__hashmap(0, print_app_settings, destroyCharKey);
 
-	app_t->server_active = 1;
+	app->server_active = 1;
 
-	return *app_t;
+	return *app;
 }
 
-void destroy_app(app *app_t) {
-	deepdestroy__hashmap(app_t->status_code);
-	deepdestroy__hashmap(app_t->routes);
-	deepdestroy__hashmap(app_t->app_settings);
+void destroy_teru(teru_t *app) {
+	deepdestroy__hashmap(app->status_code);
+	deepdestroy__hashmap(app->routes);
+	deepdestroy__hashmap(app->app_settings);
 
-	free(app_t);
+	free(app);
 
 	return;
 }
 
 void *acceptor_function(void *app_ptr);
 
-int app_listen(char *HOST, char *PORT, app app_t) {
+int app_listen(char *HOST, char *PORT, teru_t app) {
 	socket_t *socket = get_socket(HOST, PORT);
 
 	if (listen(socket->sock, BACKLOG) == -1) {
@@ -95,22 +95,22 @@ int app_listen(char *HOST, char *PORT, app app_t) {
 		return 1;
 	}
 
-	app_t.app_ptr->socket = socket;
+	app.app_ptr->socket = socket;
 
 	// start acceptor thread
 	pthread_t accept_thread;
-	pthread_create(&accept_thread, NULL, &acceptor_function, app_t.app_ptr);
+	pthread_create(&accept_thread, NULL, &acceptor_function, app.app_ptr);
 
 	printf("server go vroom\n");
 
 	while (getchar() != '0');
 
-	app_t.app_ptr->server_active = 0;
+	app.app_ptr->server_active = 0;
 	shutdown(socket->sock, SHUT_RD);
 	pthread_join(accept_thread, NULL);
 
 	destroy_socket(socket);
-	destroy_app(app_t.app_ptr);
+	destroy_teru(app.app_ptr);
 
 	return 0;
 }
@@ -118,9 +118,9 @@ int app_listen(char *HOST, char *PORT, app app_t) {
 /* ROUTE BUILDER -- POINTS TO GENERIC ROUTE BUILDER
 	|__ the only reason for these functions is to build a slightly
 		simpler interface on top of the library */
-int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
+int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
 	// check that the route doesn't exist (assumes the type matches)
-	hashmap__response *routes = (hashmap__response *) get__hashmap(app_t.routes, endpoint);
+	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint);
 
 	for (int check_route = 0; routes && check_route < routes->payload__length; check_route) {
 		listen_t *r = (listen_t *) routes->payload[check_route];
@@ -139,21 +139,21 @@ int build_new_route(app app_t, char *type, char *endpoint, void (*handler)(req_t
 	// otherwise insert new listen_t
 	listen_t *r = new_listener(type, handler);
 
-	insert__hashmap(app_t.routes, endpoint, r, "", compareCharKey, NULL);
+	insert__hashmap(app.routes, endpoint, r, "", compareCharKey, NULL);
 
 	return 0;
 }
 
-int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app_t, "GET", endpoint, handler);
+int app_get(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
+	return build_new_route(app, "GET", endpoint, handler);
 }
 
-int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app_t, "POST", endpoint, handler);
+int app_post(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
+	return build_new_route(app, "POST", endpoint, handler);
 }
 
-/* EXPRESS APP SETTINGS BUILDER */
-void app_use(app app_t, char *route, ...) {
+/* TERU APP SETTINGS BUILDER */
+void app_use(teru_t app, char *route, ...) {
 	// update route name to have a "set" at the beginning
 	char *descript = NULL;
 
@@ -172,12 +172,12 @@ void app_use(app app_t, char *route, ...) {
 	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+	insert__hashmap(app.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
 
-void app_set(app app_t, char *route, ...) {
+void app_set(teru_t app, char *route, ...) {
 	// update route name to have a "set" at the beginning
 	char *file_path = NULL;
 	char *descript = NULL;
@@ -202,7 +202,7 @@ void app_set(app app_t, char *route, ...) {
 	strcat(new_route_name, route);
 
 	if (descript)
-		insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+		insert__hashmap(app.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
@@ -503,12 +503,12 @@ typedef struct ConnectionHandle {
 	int p_handle; // socket specific pointer
 	int is_complete; // check for if the thread has finished running
 
-	app *app_t; // all the meta data
+	teru_t *app; // all the meta data
 
 	struct ConnectionHandle *next; // keep track of current threads
 } ch_t;
 
-ch_t *build_new_thread(ch_t *head, int socket, app *app_t, pthread_t *thread) {
+ch_t *build_new_thread(ch_t *head, int socket, teru_t *app, pthread_t *thread) {
 	ch_t *new_thread = malloc(sizeof(ch_t));
 
 	new_thread->thread = thread;
@@ -516,7 +516,7 @@ ch_t *build_new_thread(ch_t *head, int socket, app *app_t, pthread_t *thread) {
 	new_thread->p_handle = socket;
 	new_thread->is_complete = 0;
 
-	new_thread->app_t = app_t;
+	new_thread->app = app;
 
 	// splice in at position 1 (instead of linearly searching for end of list)
 	ch_t *next = head->next;
@@ -586,7 +586,7 @@ int join_all_threads(ch_t *curr) {
 void *connection(void *app_ptr) {
 
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
-	app app_t = *((ch_t *) app_ptr)->app_t;
+	teru_t app = *((ch_t *) app_ptr)->app;
 
 	int recv_res = 1;
 	char *buffer = malloc(sizeof(char) * MAXLINE);
@@ -594,9 +594,9 @@ void *connection(void *app_ptr) {
 
 	// make a continuous loop for new_fd while they are still alive
 	// as well as checking that the server is running
-	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t.app_ptr->server_active) {
+	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app.app_ptr->server_active) {
 		if (recv_res == -1) {
-			if (!app_t.app_ptr->server_active) break;
+			if (!app.app_ptr->server_active) break;
 
 			perror("receive: ");
 			continue;
@@ -606,11 +606,11 @@ void *connection(void *app_ptr) {
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
 
 		// using the new_request, acceess the app to see how to handle it:
-		hashmap__response *handler = get__hashmap(app_t.routes, new_request->url);
+		hashmap__response *handler = get__hashmap(app.routes, new_request->url);
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			data_send(new_fd, app_t.status_code, 404, "-t", err_msg);
+			data_send(new_fd, app.status_code, 404, "-t", err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -630,7 +630,7 @@ void *connection(void *app_ptr) {
 		if (find_handle == handler->payload__length) { /* not found -- ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
-			data_send(new_fd, app_t.status_code, 404, "-t", err_msg);
+			data_send(new_fd, app.status_code, 404, "-t", err_msg);
 			free(err_msg);
 
 			destroy_req_t(new_request);
@@ -641,8 +641,8 @@ void *connection(void *app_ptr) {
 
 		// find handle will now have the handler within it
 		// can call the handler with the data
-		res_t res = { .socket = new_fd, .status_code = app_t.status_code, 
-					  .__dirname = (char *) get__hashmap(app_t.app_settings, "setviews") };
+		res_t res = { .socket = new_fd, .status_code = app.status_code, 
+					  .__dirname = (char *) get__hashmap(app.app_settings, "setviews") };
 		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
 	
 		destroy_req_t(new_request);
@@ -650,8 +650,8 @@ void *connection(void *app_ptr) {
 	}
 
 	// if the close occurs due to thread_status, send an error page
-	if (!app_t.app_ptr->server_active) {
-		data_send(new_fd, app_t.status_code, 404, "-t", "Uh oh! The server is down... Try again in a bit.");
+	if (!app.app_ptr->server_active) {
+		data_send(new_fd, app.status_code, 404, "-t", "Uh oh! The server is down... Try again in a bit.");
 	}
 
 	close(new_fd);
@@ -661,9 +661,9 @@ void *connection(void *app_ptr) {
 }
 
 void *acceptor_function(void *app_ptr) {
-	app app_t = *(app *) app_ptr;
+	teru_t app = *(teru_t *) app_ptr;
 
-	int sock_fd = app_t.socket->sock;
+	int sock_fd = app.socket->sock;
 	int new_fd;
 	char s[INET6_ADDRSTRLEN];
 	struct sockaddr_storage their_addr; // connector's address information
@@ -672,14 +672,14 @@ void *acceptor_function(void *app_ptr) {
 	ch_t *threads = malloc(sizeof(ch_t));
 	threads->next = NULL;
 
-	while (app_t.app_ptr->server_active) {
+	while (app.app_ptr->server_active) {
 		// check threads for removal
 		check_dead_threads(threads);
 
 		sin_size = sizeof(their_addr);
 		new_fd = accept(sock_fd, (struct sockaddr *) &their_addr, &sin_size);
 		if (new_fd == -1) {
-			if (!app_t.app_ptr->server_active) break;
+			if (!app.app_ptr->server_active) break;
 
 			perror("accept");
 			continue;
@@ -687,7 +687,7 @@ void *acceptor_function(void *app_ptr) {
 
 		// at this point we can send the user into their own thread
 		pthread_t *socket = malloc(sizeof(pthread_t));
-		ch_t *new_thread = build_new_thread(threads, new_fd, app_t.app_ptr, socket);
+		ch_t *new_thread = build_new_thread(threads, new_fd, app.app_ptr, socket);
 
 		pthread_create(socket, NULL, &connection, new_thread);
 	}
