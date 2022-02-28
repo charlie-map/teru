@@ -22,8 +22,6 @@ void home_page(req_t req, res_t res) {
 	printf("%d %s\n", res.socket, res.__dirname);
 	res_sendFile(res, "home.html");
 
-	printf("end\n");
-
 	return;
 }
 

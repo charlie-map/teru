@@ -6,9 +6,6 @@
 #include <pthread.h>
 #include <math.h>
 
-// for closing everything:
-#include <signal.h>
-
 // all socket related packages
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -706,9 +703,12 @@ void *acceptor_function(void *app_ptr) {
 
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
-	int full_fpath_len = strlen(res.__dirname) + strlen(name) + 1;
+	// load full file path
+	int full_fpath_len = strlen(res.__dirname ? res.__dirname : getenv("PWD")) + strlen(name) + 1 + (!res.__dirname ? 1 : 0);
 	char *full_fpath = malloc(sizeof(char) * full_fpath_len);
-	strcpy(full_fpath, res.__dirname);
+	strcpy(full_fpath, res.__dirname ? res.__dirname : getenv("PWD"));
+	if (!res.__dirname)
+		strcat(full_fpath, "/");
 	strcat(full_fpath, name);
 
 	FILE *f_pt = fopen(full_fpath, "r");
