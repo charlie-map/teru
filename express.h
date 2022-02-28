@@ -57,8 +57,8 @@ typedef struct ResStruct {
 typedef struct Express app;
 
 app express();
-void app_use(app app_t, char *route, char *descript);
-void app_set(app app_t, char *route, char *descript);
+void app_use(app app_t, char *route, ...);
+void app_set(app app_t, char *route, ...);
 
 int app_get(app app_t, char *endpoint, void (*handler)(req_t, res_t));
 int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t));

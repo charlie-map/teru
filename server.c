@@ -20,7 +20,7 @@ void home_page(req_t req, res_t res) {
 	printf("name is %s\n", name);
 
 	printf("%d %s\n", res.socket, res.__dirname);
-	res_sendFile(res, "test.html");
+	res_sendFile(res, "home.html");
 
 	printf("end\n");
 
@@ -30,31 +30,13 @@ void home_page(req_t req, res_t res) {
 int main() {
 	app new_server = express();
 
-	char *setup_public_dir = malloc(sizeof(char) * PATH_MAX);
-	if (!getcwd(setup_public_dir, sizeof(char) * PATH_MAX)) {
-		fprintf(stderr, "getcwd() error\n");
-		exit(1);
-	}
-
-	strcat(setup_public_dir, "/public/");
-	app_use(new_server, "/", setup_public_dir);
-
-	char *setup_views_dir = malloc(sizeof(char) * PATH_MAX);
-	if (!getcwd(setup_views_dir, sizeof(char) * PATH_MAX)) {
-		fprintf(stderr, "getcwd() error\n");
-		exit(1);
-	}
-
-	strcat(setup_views_dir, "/views/");
-	app_set(new_server, "views", setup_views_dir);
+	app_use(new_server, "/", getenv("PWD"), "/public/");
+	app_set(new_server, "views", getenv("PWD"), "/views/");
 
 	// setup listener routes
 	app_get(new_server, "/", home_page);
 
 	int status = app_listen(HOST, PORT, new_server);
-
-	free(setup_public_dir);
-	free(setup_views_dir);
 
 	return 0;
 }

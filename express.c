@@ -71,7 +71,7 @@ app express() {
 	batchInsert__hashmap(app_t->status_code, "request_code.data");
 
 	app_t->routes = make__hashmap(1, print_listen_t, free_listen_t);
-	app_t->app_settings = make__hashmap(0, print_app_settings, NULL);
+	app_t->app_settings = make__hashmap(0, print_app_settings, destroyCharKey);
 
 	app_t->server_active = 1;
 
@@ -156,9 +156,21 @@ int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t)) {
 }
 
 /* EXPRESS APP SETTINGS BUILDER */
-void app_use(app app_t, char *route, char *descript) {
-	// update route name to have a "use" at the beginning
+void app_use(app app_t, char *route, ...) {
+	// update route name to have a "set" at the beginning
+	char *descript = NULL;
 
+	va_list app_set_reader;
+	va_start(app_set_reader, route);
+
+	char *file_path = va_arg(app_set_reader, char *);
+	char *sub_path = va_arg(app_set_reader, char *);
+
+	descript = malloc(sizeof(char) * (strlen(file_path) + strlen(sub_path) + 1));
+	strcpy(descript, file_path);
+	strcat(descript, sub_path);
+
+	// update route name to have a "use" at the beginning
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
 	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
@@ -168,14 +180,32 @@ void app_use(app app_t, char *route, char *descript) {
 	return;
 }
 
-void app_set(app app_t, char *route, char *descript) {
+void app_set(app app_t, char *route, ...) {
 	// update route name to have a "set" at the beginning
+	char *file_path = NULL;
+	char *descript = NULL;
+
+	va_list app_set_reader;
+	va_start(app_set_reader, route);
+
+	if (strcmp(route, "views") == 0) {
+		file_path = va_arg(app_set_reader, char *);
+		int fp_len = strlen(file_path);
+		descript = malloc(sizeof(char) * (fp_len + 1));
+		strcpy(descript, file_path);
+
+		char *sub_path = va_arg(app_set_reader, char *);
+
+		descript = realloc(descript, sizeof(char) * (fp_len + strlen(sub_path) + 1));
+		strcat(descript, sub_path);
+	}
 
 	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
 	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+	if (descript)
+		insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
