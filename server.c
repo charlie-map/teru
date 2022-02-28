@@ -53,5 +53,8 @@ int main() {
 
 	int status = app_listen(HOST, PORT, new_server);
 
+	free(setup_public_dir);
+	free(setup_views_dir);
+
 	return 0;
 }

@@ -23,11 +23,10 @@
 
 #define MAXLINE 4096
 
-static volatile sig_atomic_t server_active = 1;
+int server_active = 1;
 /* closes all data */
 void SIG_CLOSEhandle(int sig) {
 	(void) sig;
-	printf("close program\n");
 	server_active = 0;
 }
 
@@ -98,23 +97,6 @@ void destroy_app(app *app_t) {
 
 void *acceptor_function(void *app_ptr);
 
-struct SIG_Data {
-	pthread_t main_thread;
-	int main_socket;
-};
-void *sigclose_all(void *sock) {
-	int socket = ((struct SIG_Data *) sock)->main_socket;
-
-	// wait for server to close
-	while (server_active);
-
-	shutdown(socket, SHUT_RDWR);
-
-	pthread_join(((struct SIG_Data *) sock)->main_thread, NULL);
-
-	return NULL;
-}
-
 int app_listen(char *HOST, char *PORT, app app_t) {
 	socket_t *socket = get_socket(HOST, PORT);
 
@@ -133,14 +115,10 @@ int app_listen(char *HOST, char *PORT, app app_t) {
 
 	signal(SIGINT, SIG_CLOSEhandle);
 
-	// setup signal listener and closer
-	struct SIG_Data *sig_listener = malloc(sizeof(struct SIG_Data));
-	sig_listener->main_thread = accept_thread;
-	sig_listener->main_socket = socket->sock;
+	while (server_active);
 
-	pthread_t closer_thread;
-	pthread_create(&closer_thread, NULL, &sigclose_all, sig_listener);
-	pthread_join(closer_thread, NULL);
+	shutdown(socket->sock, SHUT_RD);
+	pthread_join(accept_thread, NULL);
 
 	destroy_socket(socket);
 	destroy_app(app_t.app_ptr);
@@ -193,7 +171,7 @@ void app_use(app app_t, char *route, char *descript) {
 	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
@@ -205,7 +183,7 @@ void app_set(app app_t, char *route, char *descript) {
 	new_route_name[0] = 's'; new_route_name[1] = 'e'; new_route_name[2] = 't'; new_route_name[3] = '\0';
 	strcat(new_route_name, route);
 
-	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, NULL);
+	insert__hashmap(app_t.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
@@ -675,6 +653,8 @@ void *acceptor_function(void *app_ptr) {
 		sin_size = sizeof(their_addr);
 		new_fd = accept(sock_fd, (struct sockaddr *) &their_addr, &sin_size);
 		if (new_fd == -1) {
+			if (!server_active) break;
+
 			perror("accept");
 			continue;
 		}
@@ -686,7 +666,6 @@ void *acceptor_function(void *app_ptr) {
 		pthread_create(socket, NULL, &connection, new_thread);
 	}
 
-	printf("close threads\n");
 	// rejoin all active threads
 	join_all_threads(threads);
 
