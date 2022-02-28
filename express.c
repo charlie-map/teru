@@ -23,13 +23,6 @@
 
 #define MAXLINE 4096
 
-int server_active = 1;
-/* closes all data */
-void SIG_CLOSEhandle(int sig) {
-	(void) sig;
-	server_active = 0;
-}
-
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
 
@@ -80,7 +73,7 @@ app express() {
 	app_t->routes = make__hashmap(1, print_listen_t, free_listen_t);
 	app_t->app_settings = make__hashmap(0, print_app_settings, NULL);
 
-	app_t->server_open = 1;
+	app_t->server_active = 1;
 
 	return *app_t;
 }
@@ -113,10 +106,9 @@ int app_listen(char *HOST, char *PORT, app app_t) {
 
 	printf("server go vroom\n");
 
-	signal(SIGINT, SIG_CLOSEhandle);
+	while (getchar() != '0');
 
-	while (server_active);
-
+	app_t.app_ptr->server_active = 0;
 	shutdown(socket->sock, SHUT_RD);
 	pthread_join(accept_thread, NULL);
 
@@ -540,7 +532,7 @@ int join_all_threads(ch_t *curr) {
 			// extract node
 			prev->next = curr->next;
 		} else {
-
+			shutdown(curr->p_handle, SHUT_RD);
 			pthread_join(*curr->thread, NULL);
 
 			free(curr->thread);
@@ -562,7 +554,7 @@ void *connection(void *app_ptr) {
 
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
 	app app_t = *((ch_t *) app_ptr)->app_t;
-	printf("%d %d with server %d\n", new_fd, app_t, app_t.server_open);
+	printf("%d %d with server %d\n", new_fd, app_t, app_t.app_ptr->server_active);
 
 	int recv_res = 1;
 	char *buffer = malloc(sizeof(char) * MAXLINE);
@@ -570,8 +562,10 @@ void *connection(void *app_ptr) {
 
 	// make a continuous loop for new_fd while they are still alive
 	// as well as checking that the server is running
-	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && server_active) {
+	while ((recv_res = recv(new_fd, buffer, buffer_len, 0)) != 0 && app_t.app_ptr->server_active) {
 		if (recv_res == -1) {
+			if (!app_t.app_ptr->server_active) break;
+
 			perror("receive: ");
 			continue;
 		}
@@ -619,16 +613,12 @@ void *connection(void *app_ptr) {
 	}
 
 	// if the close occurs due to thread_status, send an error page
-	if (!server_active) {
+	if (!app_t.app_ptr->server_active) {
 		data_send(new_fd, app_t.status_code, 404, "-t", "Uh oh! The server is down... Try again in a bit.");
 	}
 
 	close(new_fd);
 	free(buffer);
-
-	pthread_t *retval;
-	// close thread
-	pthread_exit(retval);
 
 	return NULL;
 }
@@ -645,15 +635,15 @@ void *acceptor_function(void *app_ptr) {
 	ch_t *threads = malloc(sizeof(ch_t));
 	threads->next = NULL;
 
-	while (server_active) {
-		printf("%d\n", server_active);
+	while (app_t.app_ptr->server_active) {
+		printf("%d\n", app_t.app_ptr->server_active);
 		// check threads for removal
 		check_dead_threads(threads);
 
 		sin_size = sizeof(their_addr);
 		new_fd = accept(sock_fd, (struct sockaddr *) &their_addr, &sin_size);
 		if (new_fd == -1) {
-			if (!server_active) break;
+			if (!app_t.app_ptr->server_active) break;
 
 			perror("accept");
 			continue;

@@ -99,6 +99,8 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	header = resize_array(header, header_max, header_index, sizeof(char));
 	sprintf(header, "HTTP/1.1 %s %s\n", status_char, status_phrase);
 
+	free(status_char);
+
 	// read all content response headers
 	int *key_num = malloc(sizeof(int));
 	char **header_key = (char **) keys__hashmap(headers, key_num);

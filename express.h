@@ -30,7 +30,7 @@ struct Express {
 
 	socket_t *socket;
 
-	int server_open; // for evaluting if the server is trying to close
+	int server_active; // for evaluting if the server is trying to close
 	/* more to come! */
 };
 
