@@ -243,7 +243,7 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 			insert__hashmap(headers, "Content-Type", "text/plain", "", compareCharKey, NULL);
 
 			data = va_arg(read_opts, char *);
-			data_length = strlen(data);
+			data_length = strlen(data) + 1;
 		} else if (options[check_option + 1] == 'h') {
 			// start with default values
 			data = va_arg(read_opts, char *);
@@ -558,8 +558,6 @@ int check_dead_threads(ch_t *curr) {
 }
 
 int join_all_threads(ch_t *curr) {
-	printf("REJOIN THREAD\n");
-
 	ch_t *prev = curr;
 	curr = curr->next;
 
@@ -592,7 +590,6 @@ void *connection(void *app_ptr) {
 
 	int new_fd = ((ch_t *) app_ptr)->p_handle;
 	app app_t = *((ch_t *) app_ptr)->app_t;
-	printf("%d %d with server %d\n", new_fd, app_t, app_t.app_ptr->server_active);
 
 	int recv_res = 1;
 	char *buffer = malloc(sizeof(char) * MAXLINE);
@@ -612,7 +609,7 @@ void *connection(void *app_ptr) {
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
 
 		// using the new_request, acceess the app to see how to handle it:
-		hashmap__response *handler = get__hashmap(app_t.routes, "/");
+		hashmap__response *handler = get__hashmap(app_t.routes, new_request->url);
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
@@ -679,7 +676,6 @@ void *acceptor_function(void *app_ptr) {
 	threads->next = NULL;
 
 	while (app_t.app_ptr->server_active) {
-		printf("%d\n", app_t.app_ptr->server_active);
 		// check threads for removal
 		check_dead_threads(threads);
 
@@ -761,6 +757,6 @@ int res_sendFile(res_t res, char *name) {
 	return 0;
 }
 
-int res_end(res_t res, char *name) {
-
+int res_end(res_t res, char *data) {
+	data_send(res.socket, res.status_code, 200, "-t", data);
 }

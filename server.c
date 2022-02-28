@@ -27,6 +27,10 @@ void home_page(req_t req, res_t res) {
 	return;
 }
 
+void different_page(req_t req, res_t res) {
+	res_end(res, "Test send");
+}
+
 int main() {
 	app new_server = express();
 
@@ -35,6 +39,7 @@ int main() {
 
 	// setup listener routes
 	app_get(new_server, "/", home_page);
+	app_get(new_server, "/test", different_page);
 
 	int status = app_listen(HOST, PORT, new_server);
 

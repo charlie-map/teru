@@ -65,7 +65,7 @@ int app_post(app app_t, char *endpoint, void (*handler)(req_t, res_t));
 /* more route types to come if necessary */
 
 int res_sendFile(res_t res, char *name);
-int res_end(res_t res, char *name);
+int res_end(res_t res, char *data);
 
 char *req_query(req_t req, char *name);
 char *req_body(req_t req, char *name);
