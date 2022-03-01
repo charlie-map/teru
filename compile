@@ -1,1 +1,1 @@
-gcc -g server.c teru.c hashmap.c request.c stack.c -pthread -lm
+gcc -g server.c teru.c hashmap.c request.c -pthread -lm
