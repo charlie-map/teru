@@ -22,9 +22,10 @@
 
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
+				  // "TERU_PUBLIC" for app_use()
 
 	void (*handler)(req_t, res_t); // handles processing for the request
-									   // made by user
+								   // made by user
 
 	/* more to come! */
 } listen_t;
@@ -68,7 +69,8 @@ teru_t teru() {
 	batchInsert__hashmap(app->status_code, "request_code.data");
 
 	app->routes = make__hashmap(1, print_listen_t, free_listen_t);
-	app->app_settings = make__hashmap(0, print_app_settings, destroyCharKey);
+	app->use_settings = make__hashmap(0, print_app_settings, destroyCharKey);
+	app->set_settings = make__hashmap(0, print_app_settings, destroyCharKey);
 
 	app->server_active = 1;
 
@@ -78,7 +80,9 @@ teru_t teru() {
 void destroy_teru(teru_t *app) {
 	deepdestroy__hashmap(app->status_code);
 	deepdestroy__hashmap(app->routes);
-	deepdestroy__hashmap(app->app_settings);
+
+	deepdestroy__hashmap(app->use_settings);
+	deepdestroy__hashmap(app->set_settings);
 
 	free(app);
 
@@ -120,7 +124,7 @@ int app_listen(char *HOST, char *PORT, teru_t app) {
 		simpler interface on top of the library */
 int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
 	// check that the route doesn't exist (assumes the type matches)
-	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint);
+	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint, "");
 
 	for (int check_route = 0; routes && check_route < routes->payload__length; check_route) {
 		listen_t *r = (listen_t *) routes->payload[check_route];
@@ -153,6 +157,17 @@ int app_post(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
 }
 
 /* TERU APP SETTINGS BUILDER */
+void get_public_file(req_t req, res_t res) {
+	// req for specific file name
+	// "/public/style.css" for example
+	res_sendFile(res, req_body(req, "file_name"));
+
+	return;
+}
+
+/* UPDATE:
+	if route starts with a "/", the it assumes setting of a public directory
+*/
 void app_use(teru_t app, char *route, ...) {
 	// update route name to have a "set" at the beginning
 	char *descript = NULL;
@@ -167,12 +182,12 @@ void app_use(teru_t app, char *route, ...) {
 	strcpy(descript, file_path);
 	strcat(descript, sub_path);
 
-	// update route name to have a "use" at the beginning
-	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
-	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
-	strcat(new_route_name, route);
+	insert__hashmap(app.app_settings, route, descript, "", compareCharKey, NULL);
 
-	insert__hashmap(app.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+	if (route[0] == '/') {
+		// add if a new route
+		build_new_route(app, "TERU_PUBLIC", route, get_public_file);
+	}
 
 	return;
 }
@@ -490,11 +505,11 @@ req_t *read_header_helper(char *header_str, int header_length) {
 }
 
 char *req_query(req_t req, char *name) {
-	return (char *) get__hashmap(req.query_map, name);
+	return (char *) get__hashmap(req.query_map, name, "");
 }
 
 char *req_body(req_t req, char *name) {
-	return (char *) get__hashmap(req.body_map, name);
+	return (char *) get__hashmap(req.body_map, name, "");
 }
 
 typedef struct ConnectionHandle {
@@ -580,6 +595,19 @@ int join_all_threads(ch_t *curr) {
 	return 0;
 }
 
+int match_hashmap_substrings(void *other_key, void *curr_key) {
+	char *io_key = (char *) other_key, *ic_key = (char *) ic_key;
+
+	// compare using length of ic_key
+	int ic_key_len = strlen(ic_key);
+
+	for (int check_match = 0; io_key[check_match] && check_match < ic_key_len; check_match++) {
+		if (io_key[check_match] != ic_key[check_match])
+			break;
+	}
+
+	return check_match == ic_key_len;
+}
 /* LISTENER FUNCTIONS FOR SOCKET */
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
 // Beej Hall websockets (http://beej.us/guide/bgnet/html/)
@@ -606,7 +634,7 @@ void *connection(void *app_ptr) {
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
 
 		// using the new_request, acceess the app to see how to handle it:
-		hashmap__response *handler = get__hashmap(app.routes, new_request->url);
+		hashmap__response *handler = get__hashmap(app.routes, new_request->url, "w", match_hashmap_substrings);
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
@@ -623,6 +651,8 @@ void *connection(void *app_ptr) {
 		// need to find the one that matches the request:
 		int find_handle;
 		for (find_handle = 0; find_handle < handler->payload__length; find_handle++) {
+			
+
 			if (strcmp(((listen_t *) handler->payload[find_handle])->r_type, new_request->type) == 0)
 				break;
 		}
@@ -642,7 +672,7 @@ void *connection(void *app_ptr) {
 		// find handle will now have the handler within it
 		// can call the handler with the data
 		res_t res = { .socket = new_fd, .status_code = app.status_code, 
-					  .__dirname = (char *) get__hashmap(app.app_settings, "setviews") };
+					  .__dirname = (char *) get__hashmap(app.app_settings, "setviews", "") };
 		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
 	
 		destroy_req_t(new_request);

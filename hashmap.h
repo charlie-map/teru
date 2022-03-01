@@ -11,7 +11,7 @@ typedef struct Store hashmap;
 hashmap *make__hashmap(int hash__type, void (*printer)(void *), void (*destroy)(void *));
 
 void **keys__hashmap(hashmap *hash__m, int *max_key);
-void *get__hashmap(hashmap *hash__m, void *key);
+void *get__hashmap(hashmap *hash__m, void *key, char *ep, ...);
 
 int print__hashmap(hashmap *hash__m);
 
