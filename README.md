@@ -2,7 +2,7 @@
 ### Charlie Hall
 
 This repository is an implementation (rework, build, etc.) of [nodejs Express](https://expressjs.com/) packed in a library to support easier server building in C. This functionality matches very closely with many functions in Express (if not quite as built out as Express currently). This README goes through the process of creating a simple web server and how each component works.
-The following code is an example of a simple ExpressC server that sends a simple HTML file `home.html` when a socket joins and goes to `/` on the page:
+The following code is an example of a simple **Teru** server that sends a simple HTML file `home.html` when a socket joins and goes to `/` on the page:
 
 ```C
 #include <stdio.h>
@@ -57,7 +57,7 @@ This `app` variable will be used throughout the following function examples.
 
 # Use Teru
 The `app_use` function will be how to add any extra components onto the Teru instance.
-***Note done***
+***Not done***
 
 # Set Teru
 To `app_set`, this takes in a key and a value pair for what to load in. For example, loading a `views` directory would look like:
