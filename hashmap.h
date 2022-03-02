@@ -2,9 +2,11 @@
 #define __HASH_T__
 
 typedef struct ReturnHashmap { // used only for type 1
-	void **payload;
-	int payload__length;
+	void *payload;
+	
+	hashmap__response *next;
 } hashmap__response;
+int clear__hashmap__response(hashmap__response *hr);
 
 typedef struct Store hashmap;
 

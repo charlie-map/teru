@@ -16,10 +16,11 @@ typedef struct Teru {
 
 	hashmap *status_code; // holds the code -> textual phrase pair
 	// routes for different request types (currently on GET and POST)
+	int curr_add_num;
 	hashmap *routes; // also for any public routes...
 
 	/* currently only hashes string to string */
-	hashmap *use_settings, set_settings;
+	hashmap *use_settings, *set_settings;
 	/*
 		`use`d parameters -- with concatenated string ("use")
 		`set` parameters -- with concatenated string ("set")

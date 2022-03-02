@@ -35,7 +35,7 @@ Wow! Looks pretty similar to the Express functions. Below lays out the current f
 
 1. [teru() -- new Teru](#New-Teru)
 ## App functionalities:
-2. [app_use()](#Use-Teru)
+2. [app_use() -- Public directories and library usage (not yet!)](#Use-Teru)
 3. [app_set()](#Set-Teru)
 ## Send functionalities:
 4. [res_sendFile()](#Send-File-to-User)
