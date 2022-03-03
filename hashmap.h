@@ -4,7 +4,7 @@
 typedef struct ReturnHashmap { // used only for type 1
 	void *payload;
 	
-	hashmap__response *next;
+	struct ReturnHashmap *next;
 } hashmap__response;
 int clear__hashmap__response(hashmap__response *hr);
 

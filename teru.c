@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <math.h>
+#include <magic.h>
 
 // all socket related packages
 #include <sys/types.h>
@@ -23,6 +24,7 @@
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
 				  // "TERU_PUBLIC" for app_use()
+	char *url_wrap; // for app_use() only
 	int add_num; // for calculating which values to look at first (PQ-esque)
 
 	void (*handler)(req_t, res_t); // handles processing for the request
@@ -31,11 +33,13 @@ typedef struct Listener {
 	/* more to come! */
 } listen_t;
 
-listen_t *new_listener(char *r_type, void (*handler)(req_t, res_t), int add_num) {
+listen_t *new_listener(char *r_type, void (*handler)(req_t, res_t), int add_num, char *url_wrap) {
 	listen_t *r = malloc(sizeof(listen_t));
 
 	r->r_type = r_type;
 	r->add_num = add_num;
+
+	r->url_wrap = url_wrap;
 
 	r->handler = handler;
 
@@ -127,12 +131,12 @@ int app_listen(char *HOST, char *PORT, teru_t app) {
 /* ROUTE BUILDER -- POINTS TO GENERIC ROUTE BUILDER
 	|__ the only reason for these functions is to build a slightly
 		simpler interface on top of the library */
-int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
+int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t), char *url_wrap) {
 	// check that the route doesn't exist (assumes the type matches)
 	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint, "");
 
-	for (int check_route = 0; routes && check_route < routes->payload__length; check_route++) {
-		listen_t *r = (listen_t *) routes->payload[check_route];
+	for (hashmap__response *rt_thru = routes; rt_thru; rt_thru = rt_thru->next) {
+		listen_t *r = (listen_t *) rt_thru->payload;
 
 		if (strcmp(type, r->r_type) == 0) { // found match
 			// replace current handler with new handler
@@ -149,7 +153,7 @@ int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_
 		free(routes);
 
 	// otherwise insert new listen_t
-	listen_t *r = new_listener(type, handler, app.app_ptr->curr_add_num);
+	listen_t *r = new_listener(type, handler, app.app_ptr->curr_add_num, url_wrap);
 	app.app_ptr->curr_add_num += 1;
 
 	insert__hashmap(app.routes, endpoint, r, "", compareCharKey, NULL);
@@ -158,18 +162,19 @@ int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_
 }
 
 int app_get(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app, "GET", endpoint, handler);
+	return build_new_route(app, "GET", endpoint, handler, NULL);
 }
 
 int app_post(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app, "POST", endpoint, handler);
+	return build_new_route(app, "POST", endpoint, handler, NULL);
 }
 
 /* TERU APP SETTINGS BUILDER */
 void get_public_file(req_t req, res_t res) {
 	// req for specific file name
 	// "/public/style.css" for example
-	res_sendFile(res, req_body(req, "file_name"));
+	printf("res send %s\n", req.url);
+	res_sendFile(res, req.url);
 
 	return;
 }
@@ -195,7 +200,7 @@ void app_use(teru_t app, char *route, ...) {
 
 	if (route[0] == '/') {
 		// add if a new route
-		build_new_route(app, "TERU_PUBLIC", route, get_public_file);
+		build_new_route(app, "TERU_PUBLIC", route, get_public_file, route);
 	}
 
 	return;
@@ -231,15 +236,24 @@ void app_set(teru_t app, char *route, ...) {
 	return;
 }
 
+// currently simple file comparer using magic.h
+char *content_type_infer(char *filename, char *data, int data_length) {
+	struct magic_set *magic = magic_open(MAGIC_MIME|MAGIC_CHECK);
+	magic_load(magic,NULL);
+
+	char *magic_file_type = magic_file(magic, filename);
+	char *file_type = malloc(strlen(magic_file_type));
+
+	strcpy(file_type, magic_file_type);
+
+	return file_type;
+}
 /*
 	options:
 		-- SENDING DATA
 			-t for simple text/plain -- expects a single char * (for data) in the overload
-			-h for text/html; charset=UTF-8
-				-- expects a char * (for data) and an int (length of char *) in the overload
-			-hc for text/html; charset=?
-				-- expects a char * (for data) and an int (length of char *)
-					and a char * (for charset) in the overload
+			-i for infering the text type (simple function currently)
+				-- expects a char * (for FILENAME), a char * (for data) and an int (length of char *)
 		-- ADDITIONAL HEADER OPTIONS:
 			-o for adding another parameter
 				-- expects a char * for the header name and a char *
@@ -265,23 +279,8 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 
 			data = va_arg(read_opts, char *);
 			data_length = strlen(data) + 1;
-		} else if (options[check_option + 1] == 'h') {
-			// start with default values
-			data = va_arg(read_opts, char *);
-			data_length = va_arg(read_opts, int);
-			char *html_option = va_arg(read_opts, char *);
-
-			char *char_set = NULL;
-			content_type = malloc(sizeof(char) * 25);
-			strcpy(content_type, "text/html; charset=");
-
-			if (options[check_option + 2] == 'c') {
-				char_set = va_arg(read_opts, char *);
-
-				content_type = realloc(content_type, sizeof(char) * (20 + strlen(char_set)));
-				strcat(content_type, char_set);
-			} else
-				strcat(content_type, "UTF-8");
+		} else if (options[check_option + 1] == 'i') {
+			char *content_type = content_type_infer(va_arg(read_opts, char *), va_arg(read_opts, char *), va_arg(read_opts, char *));
 
 			insert__hashmap(headers, "Content-Type", content_type, "", compareCharKey, NULL);
 		} else if (options[check_option + 1] == 'o') {
@@ -608,15 +607,16 @@ int match_hashmap_substrings(void *other_key, void *curr_key) {
 	char *io_key = (char *) other_key, *ic_key = (char *) curr_key;
 
 	// compare using length of ic_key
-	int ic_key_len = strlen(ic_key);
+	int ic_key_len = strlen(ic_key), io_key_len = strlen(io_key);
+	int check_length = io_key_len < ic_key_len ? io_key_len : ic_key_len;
 
 	int check_match;
-	for (check_match = 0; io_key[check_match] && check_match < ic_key_len; check_match++) {
+	for (check_match = 0; io_key[check_match] && check_match < check_length; check_match++) {
 		if (io_key[check_match] != ic_key[check_match])
 			break;
 	}
 
-	return check_match == ic_key_len;
+	return check_match == check_length;
 }
 
 int is_lower_hashmap_data(void *key1, void *key2) {
@@ -646,9 +646,15 @@ void *connection(void *app_ptr) {
 
 		// otherwise parse header data
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
+		int request_url_len = strlen(new_request->url);
 
 		// using the new_request, acceess the app to see how to handle it:
-		hashmap__response *handler = get__hashmap(app.routes, new_request->url, "iw", match_hashmap_substrings, is_lower_hashmap_data);
+		hashmap__response *handler;
+		if (new_request->url[request_url_len - 1] == '/') // is not a file -- don't look for public directories
+			handler = get__hashmap(app.routes, new_request->url, "w", is_lower_hashmap_data);
+		else
+			handler = get__hashmap(app.routes, new_request->url, "iw", match_hashmap_substrings, is_lower_hashmap_data);
+		printf("%d\n", handler);
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
@@ -664,13 +670,17 @@ void *connection(void *app_ptr) {
 		// there might be multiple (aka "/number" is a POST and a GET)
 		// need to find the one that matches the request:
 		hashmap__response *reader;
+		int is_public = 0;
 		for (reader = handler; reader; reader = reader->next) { // nice
+			printf("CHECK: %s\n", ((listen_t *) reader->payload)->r_type);
 			// case: if r_type == "TERU_PUBLIC", check system directory to
 			// see if there is a file in that folder that corresponds with
 			// the name of the request
-			if (strcmp(((listen_t *) reader->payload)->r_type, "TERU_PUBLIC") == 0) {
-				if (fsck_directory((char *) get__hashmap(app.use_settings, , new_request->url))
+			if (!(new_request->url[request_url_len - 1] == '/') && strcmp(((listen_t *) reader->payload)->r_type, "TERU_PUBLIC") == 0) {
+				if (fsck_directory((char *) get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, new_request->url), new_request->url)) {
+					is_public = 1;
 					break;
+				}
 			}
 
 			if (strcmp(((listen_t *) reader->payload)->r_type, new_request->type) == 0)
@@ -692,7 +702,7 @@ void *connection(void *app_ptr) {
 		// find handle will now have the handler within it
 		// can call the handler with the data
 		res_t res = { .socket = new_fd, .status_code = app.status_code, 
-					  .__dirname = (char *) get__hashmap(app.set_settings, "setviews", "") };
+					  .__dirname = (char *) (is_public ? get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, "") : get__hashmap(app.set_settings, "setviews", "")) };
 		((listen_t *) reader->payload)->handler(*new_request, res);
 
 		destroy_req_t(new_request);
@@ -754,6 +764,7 @@ void *acceptor_function(void *app_ptr) {
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
 	// load full file path
+	printf("%s %s\n", res.__dirname, name);
 	int full_fpath_len = strlen(res.__dirname ? res.__dirname : getenv("PWD")) + strlen(name) + 1 + (!res.__dirname ? 1 : 0);
 	char *full_fpath = malloc(sizeof(char) * full_fpath_len);
 	strcpy(full_fpath, res.__dirname ? res.__dirname : getenv("PWD"));
@@ -800,7 +811,7 @@ int res_sendFile(res_t res, char *name) {
 	free(read_line);
 	fclose(f_pt);
 
-	data_send(res.socket, res.status_code, 200, "-h", full_data, full_data_index);
+	data_send(res.socket, res.status_code, 200, "-i", full_fpath, full_data, full_data_index + 1);
 	
 	free(full_data_max);
 	free(full_data);
@@ -817,6 +828,8 @@ int fsck_directory(char *major_path, char *minor_fp) {
 
 	strcpy(full_path, major_path);
 	strcat(full_path, minor_fp + sizeof(char)); // remove first "/"
+
+	printf("%s\n", full_path);
 
 	FILE *f_ck = fopen(full_path, "r");
 
