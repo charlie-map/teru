@@ -202,15 +202,15 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	free(key_num);
 	free(header_key);
 
-	int add_on = 0;
-	if (post_data) {
-		add_on = strlen(post_data) + 3;
-		header = resize_array(header, header_max, header_index + add_on, sizeof(char));
+	int add_on = (post_data ? strlen(post_data) : 0) + 3;
+	header = resize_array(header, header_max, header_index + add_on, sizeof(char));
 
-		sprintf(header + sizeof(char) * header_index, "\n\n%s", post_data);
-	}
+	strcat(header, "\n\n");
+	if (post_data)
+		strcat(header, post_data);
 
 	*header_max = header_index + add_on;
+
 	return header;
 }
 

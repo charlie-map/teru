@@ -6,31 +6,31 @@ typedef struct ReturnHashmap { // used only for type 1
 	
 	struct ReturnHashmap *next;
 } hashmap__response;
-int clear__hashmap__response(hashmap__response *hr);
+int clear__hashmap__response(hashmap__response *);
 
 typedef struct Store hashmap;
 
-hashmap *make__hashmap(int hash__type, void (*printer)(void *), void (*destroy)(void *));
+hashmap *make__hashmap(int, void (*)(void *), void (*)(void *));
 
-void **keys__hashmap(hashmap *hash__m, int *max_key);
-void *get__hashmap(hashmap *hash__m, void *key, char *ep, ...);
+void **keys__hashmap(hashmap *, int *);
+void *get__hashmap(hashmap *, void *, char *, ...);
 
-int print__hashmap(hashmap *hash__m);
+int print__hashmap(hashmap *);
 
-int delete__hashmap(hashmap *hash__m, void *key);
+int delete__hashmap(hashmap *, void *);
 
-int deepdestroy__hashmap(hashmap *hash);
+int deepdestroy__hashmap(hashmap *);
 
-int batchInsert__hashmap(hashmap *hash__m, char *filename);
-int insert__hashmap(hashmap *hash__m, void *key, void *value, ...);
+int batchInsert__hashmap(hashmap *, char *);
+int insert__hashmap(hashmap *, void *, void *, ...);
 
 // simple key type functions
-void printCharKey(void *characters);
-int compareCharKey(void *characters, void *otherValue);
-void destroyCharKey(void *characters);
+void printCharKey(void *);
+int compareCharKey(void *, void *);
+void destroyCharKey(void *);
 
-void printIntKey(void *integer);
-int compareIntKey(void *integer, void *otherValue);
-void destroyIntKey(void *integer);
+void printIntKey(void *);
+int compareIntKey(void *, void *);
+void destroyIntKey(void *);
 
 #endif

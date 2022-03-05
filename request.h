@@ -10,7 +10,7 @@ typedef struct SocketData {
 } socket_t;
 
 socket_t *get_socket(char *HOST, char *PORT);
-int destroy_socket(socket_t *socket_data);
+int destroy_socket(socket_t *);
 
 char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size, char *post_data);
 hashmap *read_headers(char *header_str, void (*print_key)(void *), int *header_end);

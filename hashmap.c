@@ -279,7 +279,6 @@ void *get__hashmap(hashmap *hash__m, void *key, char *ep, ...) {
 								new_node_element->payload = ((void **) ll_search->ll_meat)[set_return_meat];
 
 								// check for setting as head
-								printf("%d %d\n", ((void **) ll_search->ll_meat)[set_return_meat], set_intern_meat->payload);
 								if (is_lower(((void **) ll_search->ll_meat)[set_return_meat], set_intern_meat->payload)) {
 									returnMeat->next = returnMeat;
 									returnMeat = new_node_element;
