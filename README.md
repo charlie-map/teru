@@ -35,11 +35,12 @@ Wow! Looks pretty similar to the Express functions. Below lays out the current f
 
 1. [teru() -- new Teru](#New-Teru)
 ## App functionalities:
-2. [app_use() -- Public directories and library usage (not yet!)](#Use-Teru)
-3. [app_set()](#Set-Teru)
+2. [app_use() -- Public directories and library usage](#Use-Teru)
+3. [app_set() -- Views directory](#Set-Teru)
 ## Send functionalities:
-4. [res_sendFile()](#Send-File-to-User)
-5. [res_end()](#Send-Message-to-User)
+4. [res_sendFile() -- Send a file](#Send-File-to-User)
+5. [res_end() -- Send a string](#Send-Message-to-User)
+6. [res_render() -- Send a file with match keys that replace to allow for dynamic HTML pages](#Render-File-to-User)
 ## Request parameters:
 6. [req_query()](#See-Request-Query-Parameters)
 7. [req_body()](#See-Request-Body-Parameters)
@@ -111,6 +112,9 @@ Then connect to an endpoint:
 ```C
 app_get(app, "/hi", hello_there);
 ```
+
+# Render File to User
+***Not done***
 
 # See Request Query Parameters
 Request query parameters are added at the end of the URL (for example `localhost:8888/hi?name=Charlie`). `req_query()` allows access to these by inserting the name of the query parameter:
