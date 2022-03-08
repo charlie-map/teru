@@ -170,13 +170,12 @@ char *build_url(char *request_url, int *req_length, char *query_param, char **at
 }
 
 char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size, char *post_data) {
-	int header_size;
 	int header_index = 0; *header_max = 32;
 	char *header = malloc(sizeof(char) * *header_max);
 
 	char *status_char = malloc(sizeof(char) * 4);
 	sprintf(status_char, "%d", STATUS);
-	char *status_phrase = (char *) get__hashmap(status_code, status_char);
+	char *status_phrase = (char *) get__hashmap(status_code, status_char, "");
 	int status_phrase_len = strlen(status_char) + strlen(status_phrase);
 
 	header_index = status_phrase_len + 11;
@@ -190,7 +189,7 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	char **header_key = (char **) keys__hashmap(headers, key_num);
 
 	for (int cp_header = 0; cp_header < *key_num; cp_header++) {
-		char *header_value = (char *) get__hashmap(headers, header_key[cp_header]);
+		char *header_value = (char *) get__hashmap(headers, header_key[cp_header], "");
 
 		int head_add_on = strlen(header_key[cp_header]) + strlen(header_value) + 3;
 		header = resize_array(header, header_max, header_index + head_add_on + 4, sizeof(char));
@@ -203,15 +202,15 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	free(key_num);
 	free(header_key);
 
-	int add_on = 0;
-	if (post_data) {
-		add_on = strlen(post_data) + 3;
-		header = resize_array(header, header_max, header_index + add_on, sizeof(char));
+	int add_on = (post_data ? strlen(post_data) : 0) + 3;
+	header = resize_array(header, header_max, header_index + add_on, sizeof(char));
 
-		sprintf(header + sizeof(char) * header_index, "\n\n%s\0", post_data);
-	}
+	strcat(header, "\n\n");
+	if (post_data)
+		strcat(header, post_data);
 
 	*header_max = header_index + add_on;
+
 	return header;
 }
 
@@ -292,7 +291,8 @@ hashmap *read_headers(char *header_str, void (*print_key)(void *), int *header_e
 		// head head tag
 		while ((int) header_str[past_lines + head_index] != 58) {
 
-			head_tag[head_index++] = header_str[past_lines + head_index];
+			head_tag[head_index] = header_str[past_lines + head_index];
+			head_index++;
 
 			head_tag = resize_array(head_tag, head_max, head_index, sizeof(char));
 			head_tag[head_index] = '\0';
@@ -302,7 +302,8 @@ hashmap *read_headers(char *header_str, void (*print_key)(void *), int *header_e
 
 		// read attr tag
 		while ((int) header_str[past_lines + attr_index + 1] != 10) {
-			attr_tag[attr_index++] = header_str[past_lines + attr_index];
+			attr_tag[attr_index] = header_str[past_lines + attr_index];
+			attr_index++;
 
 			attr_tag = resize_array(attr_tag, attr_max, attr_index, sizeof(char));
 			attr_tag[attr_index] = '\0';
@@ -326,8 +327,6 @@ socket_t *get_socket(char *HOST, char *PORT) {
 	//int *sock_fd = malloc(sizeof(int)); // listen on sock_fd
 	int sock;
 	struct addrinfo hints, *servinfo, *p;
-	struct sockaddr_storage their_addr; // connector's address information
-	struct sigaction sa;
 
 	int yes = 1;
 	int status;

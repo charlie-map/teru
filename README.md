@@ -35,11 +35,12 @@ Wow! Looks pretty similar to the Express functions. Below lays out the current f
 
 1. [teru() -- new Teru](#New-Teru)
 ## App functionalities:
-2. [app_use()](#Use-Teru)
-3. [app_set()](#Set-Teru)
+2. [app_use() -- Public directories and library usage](#Use-Teru)
+3. [app_set() -- Views directory](#Set-Teru)
 ## Send functionalities:
-4. [res_sendFile()](#Send-File-to-User)
-5. [res_end()](#Send-Message-to-User)
+4. [res_sendFile() -- Send a file](#Send-File-to-User)
+5. [res_end() -- Send a string](#Send-Message-to-User)
+6. [res_render() -- Send a file with match keys that replace to allow for dynamic HTML pages](#Render-File-to-User)
 ## Request parameters:
 6. [req_query()](#See-Request-Query-Parameters)
 7. [req_body()](#See-Request-Body-Parameters)
@@ -112,6 +113,30 @@ Then connect to an endpoint:
 app_get(app, "/hi", hello_there);
 ```
 
+# Render File to User
+This allows for a server to take an HTML page and find and replace occurences of _match strings_. There are a few steps for setting this up:
+- Create an HTML file with match strings. The _start match_ and _end match_ can be whatever strings you wish. However, these strings must match what you give the `render()` function in the following steps.
+
+```HTML
+<html>
+	<head>
+		<title>Render Example</title>
+	</head>
+	<body>
+		<h1>Hi there {{NAME}}!</h1>
+	</body>
+</html>
+```
+- Next, set the match parameters using the `res_matches()` function, which for the previous example would look like the following. Note that `res` references the second parameter of the handler function (see [res_sendFile](#Send-File-to-User) for an example).
+```C
+res_matches(res, "NAME", "charlie-map");
+```
+- Finally, use the `res_render()` function to interpret the match strings and send the result to the user. `res_render()` takes in `res`, the name of the file, and the _start match_ and _end match_. Assuming the above HTML file is named "home.html", the `res_render()` call would look like:
+
+```C
+res_render(res, "home", "{{", "}}");
+```
+
 # See Request Query Parameters
 Request query parameters are added at the end of the URL (for example `localhost:8888/hi?name=Charlie`). `req_query()` allows access to these by inserting the name of the query parameter:
 
@@ -147,7 +172,5 @@ app_post(app, "/hi", hello_name);
 # Teru's Future
 Currently there are a few bucket list items that will be check off over time. However, feel free to [leave an issue](https://github.com/charlie-map/wiki_backend/issues) with any suggested enhancements.
 
-- `app_use()` functionality
 - `app_put()`, `app_delete()`, etc.
 - more `app_set()` functionality
-- `res_render()` see [Mustache Express](https://www.npmjs.com/package/mustache-express)

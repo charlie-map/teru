@@ -17,22 +17,30 @@
 #include <netdb.h>
 
 #include "teru.h"
+#include "typeinfer.h"
 
 #define MAXLINE 4096
 
 typedef struct Listener {
 	char *r_type; // "GET" / "POST" / etc.
+				  // "TERU_PUBLIC" for app_use()
+	char *url_wrap; // for app_use() only
+	int add_num; // for calculating which values to look at first (PQ-esque)
 
 	void (*handler)(req_t, res_t); // handles processing for the request
-									   // made by user
+								   // made by user
 
 	/* more to come! */
 } listen_t;
 
-listen_t *new_listener(char *r_type, void (*handler)(req_t, res_t)) {
+listen_t *new_listener(char *r_type, void (*handler)(req_t, res_t), int add_num, char *url_wrap) {
 	listen_t *r = malloc(sizeof(listen_t));
 
 	r->r_type = r_type;
+	r->add_num = add_num;
+
+	r->url_wrap = url_wrap;
+
 	r->handler = handler;
 
 	return r;
@@ -67,8 +75,10 @@ teru_t teru() {
 	app->status_code = make__hashmap(0, NULL, destroyCharKey);
 	batchInsert__hashmap(app->status_code, "request_code.data");
 
+	app->curr_add_num = 0;
 	app->routes = make__hashmap(1, print_listen_t, free_listen_t);
-	app->app_settings = make__hashmap(0, print_app_settings, destroyCharKey);
+	app->use_settings = make__hashmap(0, print_app_settings, destroyCharKey);
+	app->set_settings = make__hashmap(0, print_app_settings, destroyCharKey);
 
 	app->server_active = 1;
 
@@ -78,17 +88,34 @@ teru_t teru() {
 void destroy_teru(teru_t *app) {
 	deepdestroy__hashmap(app->status_code);
 	deepdestroy__hashmap(app->routes);
-	deepdestroy__hashmap(app->app_settings);
+
+	deepdestroy__hashmap(app->use_settings);
+	deepdestroy__hashmap(app->set_settings);
 
 	free(app);
 
 	return;
 }
 
+hashmap *inferer_map;
+
 void *acceptor_function(void *app_ptr);
+int fsck_directory(char *major_path, char *minor_fp); // check for if a file exists
 
 int app_listen(char *HOST, char *PORT, teru_t app) {
+	printf("\033[0;32m");
+	printf("\nTeru Server starting on ");
+	printf("\033[0;37m");
+	printf("%s", HOST);
+	printf("\033[0;32m");
+	printf(":");
+	printf("\033[0;37m");
+	printf("%s", PORT);
+	printf("\033[0;32m");
+	printf("...\n\n");
+
 	socket_t *socket = get_socket(HOST, PORT);
+	inferer_map = infer_load();
 
 	if (listen(socket->sock, BACKLOG) == -1) {
 		perror("listen error");
@@ -102,6 +129,7 @@ int app_listen(char *HOST, char *PORT, teru_t app) {
 	pthread_create(&accept_thread, NULL, &acceptor_function, app.app_ptr);
 
 	printf("server go vroom\n");
+	printf("\033[0;37m");
 
 	while (getchar() != '0');
 
@@ -112,18 +140,20 @@ int app_listen(char *HOST, char *PORT, teru_t app) {
 	destroy_socket(socket);
 	destroy_teru(app.app_ptr);
 
+	deepdestroy__hashmap(inferer_map);
+
 	return 0;
 }
 
 /* ROUTE BUILDER -- POINTS TO GENERIC ROUTE BUILDER
 	|__ the only reason for these functions is to build a slightly
 		simpler interface on top of the library */
-int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t)) {
+int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_t, res_t), char *url_wrap) {
 	// check that the route doesn't exist (assumes the type matches)
-	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint);
+	hashmap__response *routes = (hashmap__response *) get__hashmap(app.routes, endpoint, "");
 
-	for (int check_route = 0; routes && check_route < routes->payload__length; check_route) {
-		listen_t *r = (listen_t *) routes->payload[check_route];
+	for (hashmap__response *rt_thru = routes; rt_thru; rt_thru = rt_thru->next) {
+		listen_t *r = (listen_t *) rt_thru->payload;
 
 		if (strcmp(type, r->r_type) == 0) { // found match
 			// replace current handler with new handler
@@ -136,8 +166,12 @@ int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_
 		}
 	}
 
+	if (routes)
+		free(routes);
+
 	// otherwise insert new listen_t
-	listen_t *r = new_listener(type, handler);
+	listen_t *r = new_listener(type, handler, app.app_ptr->curr_add_num, url_wrap);
+	app.app_ptr->curr_add_num += 1;
 
 	insert__hashmap(app.routes, endpoint, r, "", compareCharKey, NULL);
 
@@ -145,14 +179,25 @@ int build_new_route(teru_t app, char *type, char *endpoint, void (*handler)(req_
 }
 
 int app_get(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app, "GET", endpoint, handler);
+	return build_new_route(app, "GET", endpoint, handler, NULL);
 }
 
 int app_post(teru_t app, char *endpoint, void (*handler)(req_t, res_t)) {
-	return build_new_route(app, "POST", endpoint, handler);
+	return build_new_route(app, "POST", endpoint, handler, NULL);
 }
 
 /* TERU APP SETTINGS BUILDER */
+void get_public_file(req_t req, res_t res) {
+	// req for specific file name
+	// "/public/style.css" for example
+	res_sendFile(res, req.url);
+
+	return;
+}
+
+/* UPDATE:
+	if route starts with a "/", the it assumes setting of a public directory
+*/
 void app_use(teru_t app, char *route, ...) {
 	// update route name to have a "set" at the beginning
 	char *descript = NULL;
@@ -167,12 +212,12 @@ void app_use(teru_t app, char *route, ...) {
 	strcpy(descript, file_path);
 	strcat(descript, sub_path);
 
-	// update route name to have a "use" at the beginning
-	char *new_route_name = malloc(sizeof(char) * (strlen(route) + 4));
-	new_route_name[0] = 'u'; new_route_name[1] = 's'; new_route_name[2] = 'e'; new_route_name[3] = '\0';
-	strcat(new_route_name, route);
+	insert__hashmap(app.use_settings, route, descript, "", compareCharKey, NULL);
 
-	insert__hashmap(app.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+	if (route[0] == '/') {
+		// add if a new route
+		build_new_route(app, "TERU_PUBLIC", route, get_public_file, route);
+	}
 
 	return;
 }
@@ -202,7 +247,7 @@ void app_set(teru_t app, char *route, ...) {
 	strcat(new_route_name, route);
 
 	if (descript)
-		insert__hashmap(app.app_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
+		insert__hashmap(app.set_settings, new_route_name, descript, "", compareCharKey, destroyCharKey);
 
 	return;
 }
@@ -211,11 +256,8 @@ void app_set(teru_t app, char *route, ...) {
 	options:
 		-- SENDING DATA
 			-t for simple text/plain -- expects a single char * (for data) in the overload
-			-h for text/html; charset=UTF-8
-				-- expects a char * (for data) and an int (length of char *) in the overload
-			-hc for text/html; charset=?
-				-- expects a char * (for data) and an int (length of char *)
-					and a char * (for charset) in the overload
+			-i for infering the text type (simple function currently)
+				-- expects a char * (for FILENAME), a char * (for data) and an int (length of char *)
 		-- ADDITIONAL HEADER OPTIONS:
 			-o for adding another parameter
 				-- expects a char * for the header name and a char *
@@ -241,23 +283,12 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 
 			data = va_arg(read_opts, char *);
 			data_length = strlen(data) + 1;
-		} else if (options[check_option + 1] == 'h') {
-			// start with default values
+		} else if (options[check_option + 1] == 'i') {
+			char *file_data_name = va_arg(read_opts, char *);
 			data = va_arg(read_opts, char *);
-			data_length = va_arg(read_opts, int);
-			char *html_option = va_arg(read_opts, char *);
+			data_length = va_arg(read_opts, int) + 1;
 
-			char *char_set = NULL;
-			content_type = malloc(sizeof(char) * 25);
-			strcpy(content_type, "text/html; charset=");
-
-			if (options[check_option + 2] == 'c') {
-				char_set = va_arg(read_opts, char *);
-
-				content_type = realloc(content_type, sizeof(char) * (20 + strlen(char_set)));
-				strcat(content_type, char_set);
-			} else
-				strcat(content_type, "UTF-8");
+			char *content_type = content_type_infer(inferer_map, file_data_name, data, data_length);
 
 			insert__hashmap(headers, "Content-Type", content_type, "", compareCharKey, NULL);
 		} else if (options[check_option + 1] == 'o') {
@@ -279,7 +310,7 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 	char *main_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, data);
 
 	int bytes_sent = 0;
-	while ((bytes_sent = send(sock, main_head_msg, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
+	while ((bytes_sent = send(sock, main_head_msg + bytes_sent, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
 
 	free(head_msg_len);
 	if (lengthOf_data_length) free(lengthOf_data_length);
@@ -309,7 +340,9 @@ void destroy_req_t(req_t *r) {
 }
 
 void destroy_res_t(res_t *r) {
-	/* NEEDS UPDATING */
+	free(r);
+
+	return;
 }
 /* HEADER PARSER 
 	This handles taking in a header like:
@@ -490,11 +523,28 @@ req_t *read_header_helper(char *header_str, int header_length) {
 }
 
 char *req_query(req_t req, char *name) {
-	return (char *) get__hashmap(req.query_map, name);
+	return (char *) get__hashmap(req.query_map, name, "");
 }
 
 char *req_body(req_t req, char *name) {
-	return (char *) get__hashmap(req.body_map, name);
+	return (char *) get__hashmap(req.body_map, name, "");
+}
+
+res_t *create_response_struct(int socket, hashmap *status_code, char *__dirname) {
+	res_t *res = malloc(sizeof(res_t));
+
+	res->res_self = res;
+
+	res->render = 0;
+	res->fileName = NULL; res->matchStart = NULL; res->matchEnd = NULL;
+	res->render_matches = NULL;
+
+	res->socket = socket;
+	res->status_code = status_code;
+
+	res->__dirname = __dirname;
+
+	return res;
 }
 
 typedef struct ConnectionHandle {
@@ -580,6 +630,25 @@ int join_all_threads(ch_t *curr) {
 	return 0;
 }
 
+int match_hashmap_substrings(void *other_key, void *curr_key) {
+	char *io_key = (char *) other_key, *ic_key = (char *) curr_key;
+
+	// compare using length of ic_key
+	int ic_key_len = strlen(ic_key), io_key_len = strlen(io_key);
+	int check_length = io_key_len < ic_key_len ? io_key_len : ic_key_len;
+
+	int check_match;
+	for (check_match = 0; io_key[check_match] && check_match < check_length; check_match++) {
+		if (io_key[check_match] != ic_key[check_match])
+			break;
+	}
+
+	return check_match == check_length;
+}
+
+int is_lower_hashmap_data(void *key1, void *key2) {
+	return ((listen_t *) key1)->add_num < ((listen_t *) key2)->add_num;
+}
 /* LISTENER FUNCTIONS FOR SOCKET */
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
 // Beej Hall websockets (http://beej.us/guide/bgnet/html/)
@@ -604,9 +673,14 @@ void *connection(void *app_ptr) {
 
 		// otherwise parse header data
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
+		int request_url_len = strlen(new_request->url);
 
 		// using the new_request, acceess the app to see how to handle it:
-		hashmap__response *handler = get__hashmap(app.routes, new_request->url);
+		hashmap__response *handler;
+		if (new_request->url[request_url_len - 1] == '/') // is not a file -- don't look for public directories
+			handler = get__hashmap(app.routes, new_request->url, "w", is_lower_hashmap_data);
+		else
+			handler = get__hashmap(app.routes, new_request->url, "iw", match_hashmap_substrings, is_lower_hashmap_data);
 		if (!handler) { /* ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
@@ -621,13 +695,24 @@ void *connection(void *app_ptr) {
 
 		// there might be multiple (aka "/number" is a POST and a GET)
 		// need to find the one that matches the request:
-		int find_handle;
-		for (find_handle = 0; find_handle < handler->payload__length; find_handle++) {
-			if (strcmp(((listen_t *) handler->payload[find_handle])->r_type, new_request->type) == 0)
+		hashmap__response *reader;
+		int is_public = 0;
+		for (reader = handler; reader; reader = reader->next) { // nice
+			// case: if r_type == "TERU_PUBLIC", check system directory to
+			// see if there is a file in that folder that corresponds with
+			// the name of the request
+			if (!(new_request->url[request_url_len - 1] == '/') && strcmp(((listen_t *) reader->payload)->r_type, "TERU_PUBLIC") == 0) {
+				if (fsck_directory((char *) get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, new_request->url), new_request->url)) {
+					is_public = 1;
+					break;
+				}
+			}
+
+			if (strcmp(((listen_t *) reader->payload)->r_type, new_request->type) == 0)
 				break;
 		}
 
-		if (find_handle == handler->payload__length) { /* not found -- ERROR HANDLE */
+		if (!reader) { /* not found -- ERROR HANDLE */
 			char *err_msg = malloc(sizeof(char) * (10 + strlen(new_request->type) + strlen(new_request->url)));
 			sprintf(err_msg, "Cannot %s %s\n", new_request->type, new_request->url);
 			data_send(new_fd, app.status_code, 404, "-t", err_msg);
@@ -641,12 +726,13 @@ void *connection(void *app_ptr) {
 
 		// find handle will now have the handler within it
 		// can call the handler with the data
-		res_t res = { .socket = new_fd, .status_code = app.status_code, 
-					  .__dirname = (char *) get__hashmap(app.app_settings, "setviews") };
-		((listen_t *) handler->payload[find_handle])->handler(*new_request, res);
-	
+		res_t *res = create_response_struct(new_fd, app.status_code,
+			(char *) (is_public ? get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, "") : get__hashmap(app.set_settings, "setviews", "")));
+		((listen_t *) reader->payload)->handler(*new_request, *res);
+
 		destroy_req_t(new_request);
-		free(handler);
+		destroy_res_t(res);
+		clear__hashmap__response(handler);
 	}
 
 	// if the close occurs due to thread_status, send an error page
@@ -701,15 +787,199 @@ void *acceptor_function(void *app_ptr) {
 }
 
 
+typedef struct RenderSchema {
+	int *max_render_match_check, render_match_check_index,
+		render_start_matcher_index, render_end_matcher_index;
+
+	int render_start_matcher_length, render_end_matcher_length;
+
+	int *max_render_match_buffer, render_match_buffer_index;
+	char *render_match_buffer;
+
+	char *render_match_check;
+	char *render_start_matcher, *render_end_matcher;
+
+	hashmap *res_render_matches;
+} render_scheme_t;
+render_scheme_t *create_render_scheme(res_t *res) {
+	render_scheme_t *new_scheme = malloc(sizeof(render_scheme_t));
+
+	new_scheme->max_render_match_check = malloc(sizeof(int));
+	*new_scheme->max_render_match_check = 8;
+	new_scheme->render_match_check_index = 0;
+	new_scheme->render_start_matcher_index = 0;
+	new_scheme->render_end_matcher_index = 0;
+
+	new_scheme->max_render_match_buffer = malloc(sizeof(int));
+	*new_scheme->max_render_match_buffer = 8;
+	new_scheme->render_match_buffer_index = 0;
+
+	new_scheme->render_start_matcher_length = strlen(res->matchStart);
+	new_scheme->render_end_matcher_length = strlen(res->matchEnd);
+
+	new_scheme->res_render_matches = res->render_matches;
+
+	new_scheme->render_match_buffer = malloc(sizeof(char) * 8);
+	new_scheme->render_match_check = malloc(sizeof(char) * 8);
+	new_scheme->render_start_matcher = res->matchStart;
+	new_scheme->render_end_matcher = res->matchEnd;
+
+	return new_scheme;
+}
+
+int scheme_reset(render_scheme_t *r_scheme) {
+	r_scheme->render_match_check_index = 0;
+	r_scheme->render_start_matcher_index = 0;
+	r_scheme->render_end_matcher_index = 0;
+
+	r_scheme->render_match_check[0] = '\0';
+
+	return 0;
+}
+
+int destroy_render_scheme(render_scheme_t *r_scheme) {
+	free(r_scheme->max_render_match_check);
+	free(r_scheme->max_render_match_buffer);
+
+	free(r_scheme->render_match_check);
+	free(r_scheme->render_match_buffer);
+
+	free(r_scheme);
+
+	return 0;
+}
+
+int check_renders(render_scheme_t *r_scheme, char *full_line, char **full_data,
+	int *full_data_max, int full_data_index) {
+	
+	int has_found_start_match; // checking if the matcher indices have changed
+	int has_index_change; // for checking if data in buffer needs
+							  // to be written to full_data
+	// read through the line and check against render matches and see if we should start reading a key
+	for (int read_full_line = 0; full_line[read_full_line]; read_full_line++) {
+		has_index_change = 0;
+		has_found_start_match = 0;
+		// casing:
+		// no nothing, look for render_start_matcher
+		if (r_scheme->render_start_matcher_index < r_scheme->render_start_matcher_length) {
+			// check for if line matches renderer:
+			if (full_line[read_full_line] == r_scheme->render_start_matcher[r_scheme->render_start_matcher_index]) {
+				has_found_start_match = 1;
+				r_scheme->render_start_matcher_index++;
+
+				if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length - 1)
+					r_scheme->render_match_buffer_index = 0;
+			} else {
+				has_index_change = r_scheme->render_start_matcher_index > 0;
+				r_scheme->render_start_matcher_index = 0;
+			}
+		}
+		if (r_scheme->render_start_matcher_index == r_scheme->render_end_matcher_length &&
+			r_scheme->render_end_matcher_index < r_scheme->render_end_matcher_length) {
+			if (full_line[read_full_line] == r_scheme->render_end_matcher[r_scheme->render_end_matcher_index]) {
+				has_found_start_match = 1;
+				r_scheme->render_end_matcher_index++;
+			} else {
+				has_index_change = r_scheme->render_end_matcher_index > 0;
+				r_scheme->render_end_matcher_index = 0;
+			}
+		}
+
+		// check if a character should be briefly stored in buffer to see
+		// if the character is part of the start or end matcher
+		if (has_found_start_match && (r_scheme->render_start_matcher_index < r_scheme->render_start_matcher_length ||
+			r_scheme->render_end_matcher_index < r_scheme->render_end_matcher_length)) {
+
+			// copy character into buffer
+			r_scheme->render_match_buffer[r_scheme->render_match_buffer_index] = full_line[read_full_line];
+			r_scheme->render_match_buffer_index++;
+
+			r_scheme->render_match_buffer = resize_array(r_scheme->render_match_buffer, r_scheme->max_render_match_buffer, r_scheme->render_match_buffer_index, sizeof(char));
+			r_scheme->render_match_buffer[r_scheme->render_match_buffer_index] = '\0';
+		
+			continue;
+		}
+
+		if (has_index_change) {
+			// read render_match_buffer into full_data
+			*full_data = resize_array(*full_data, full_data_max, full_data_index + r_scheme->render_match_buffer_index, sizeof(char));
+
+			strcat(*full_data, r_scheme->render_match_buffer);
+			r_scheme->render_match_buffer_index = 0;
+		}
+
+		// have render_start_matcher, start reading directly into render_match_check
+		if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length &&
+			r_scheme->render_end_matcher_index != r_scheme->render_end_matcher_length) {
+
+			r_scheme->render_match_check[r_scheme->render_match_check_index] = full_line[read_full_line];
+			r_scheme->render_match_check_index++;
+
+			r_scheme->render_match_check = resize_array(r_scheme->render_match_check, r_scheme->max_render_match_check, r_scheme->render_match_check_index, sizeof(char));
+			r_scheme->render_match_check[r_scheme->render_match_check_index] = '\0';
+
+			continue;
+		}
+		// find render_end_matcher:
+			// close connection
+		if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length &&
+			r_scheme->render_end_matcher_index == r_scheme->render_end_matcher_length) {
+			// see what should be in the place of this found word:
+			char *replacer = get__hashmap(r_scheme->res_render_matches, r_scheme->render_match_check, "");
+			
+			if (!replacer) {
+				scheme_reset(r_scheme);
+				continue;
+			}
+
+			int replacer_len = strlen(replacer);
+
+			*full_data = resize_array(*full_data, full_data_max, full_data_index + replacer_len, sizeof(char));
+
+			strcat(*full_data, replacer);
+
+			// reset data
+			scheme_reset(r_scheme);
+
+			full_data_index += replacer_len;
+		} else {
+			// add to full_data
+			(*full_data)[full_data_index] = full_line[read_full_line];
+			full_data_index++;
+
+			(*full_data)[full_data_index] = '\0';
+		}
+	}
+
+	return full_data_index;
+}
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
+	res_t *res_pt = res.res_self;
+
+	if (res_pt->render && (!res_pt->matchStart || !res_pt->matchEnd)) {
+		printf("\033[0;31m");
+		printf("\n** Render match schema failed -- missing: %s%s%s **\n",
+			res_pt->matchStart ? "" : "start match ", !res_pt->matchStart && !res_pt->matchEnd ?
+			"and " : "", res_pt->matchEnd ? "" : "end match");
+		printf("\033[0;37m");
+
+		char *err_msg = malloc(sizeof(char) * (27));
+		sprintf(err_msg, "Render match schema failed");
+		data_send(res.socket, res.status_code, 500, "-t", err_msg);
+		free(err_msg);
+
+		return 0;
+	}
+
 	// load full file path
-	int full_fpath_len = strlen(res.__dirname ? res.__dirname : getenv("PWD")) + strlen(name) + 1 + (!res.__dirname ? 1 : 0);
+	int full_fpath_len = strlen(res.__dirname ? res.__dirname : getenv("PWD")) + strlen(name) +
+		(name[0] == '/' ? -1 : 0) + 1 + (!res.__dirname ? 1 : 0);
 	char *full_fpath = malloc(sizeof(char) * full_fpath_len);
 	strcpy(full_fpath, res.__dirname ? res.__dirname : getenv("PWD"));
 	if (!res.__dirname)
 		strcat(full_fpath, "/");
-	strcat(full_fpath, name);
+	strcat(full_fpath, name + (name[0] == '/' ? 1 : 0));
 
 	FILE *f_pt = fopen(full_fpath, "r");
 
@@ -727,8 +997,6 @@ int res_sendFile(res_t res, char *name) {
 		return 1;
 	}
 
-	free(full_fpath);
-
 	// if file opens, read from file to create a new request
 	size_t read_line_size = sizeof(char) * 64;
 	char *read_line = malloc(read_line_size);
@@ -738,20 +1006,32 @@ int res_sendFile(res_t res, char *name) {
 	char *full_data = malloc(sizeof(char) * *full_data_max);
 	full_data[0] = '\0';
 
+	/* RENDER SCHEMES */
+	render_scheme_t *r_scheme = res_pt->render ? create_render_scheme(res_pt) : NULL;
+
 	int curr_line_len = 0;
 	while ((curr_line_len = getline(&read_line, &read_line_size, f_pt)) != -1) {
-		full_data_index += curr_line_len;
-		full_data = resize_array(full_data, full_data_max, full_data_index + 1, sizeof(char));
+		full_data = resize_array(full_data, full_data_max, full_data_index + curr_line_len + 1, sizeof(char));
 
-		strcat(full_data, read_line);
+		// check for if any rendering calculations should occur
+		if (res_pt->render) {
+			full_data_index = check_renders(r_scheme, read_line, &full_data, full_data_max, full_data_index);
+		} else {
+			strcat(full_data, read_line);
+		}
+
 		full_data[full_data_index] = '\0';
 	}
+
+	if (r_scheme)
+		destroy_render_scheme(r_scheme);
 
 	free(read_line);
 	fclose(f_pt);
 
-	data_send(res.socket, res.status_code, 200, "-h", full_data, full_data_index);
+	data_send(res.socket, res.status_code, 200, "-i", full_fpath, full_data, full_data_index);
 	
+	free(full_fpath);
 	free(full_data_max);
 	free(full_data);
 	return 0;
@@ -759,4 +1039,58 @@ int res_sendFile(res_t res, char *name) {
 
 int res_end(res_t res, char *data) {
 	data_send(res.socket, res.status_code, 200, "-t", data);
+
+	return 0;
+}
+
+int res_matches(res_t res, char *match, char *replacer) {
+	res_t *res_pt = res.res_self;
+
+	if (!res_pt->render_matches)
+		res_pt->render_matches = make__hashmap(0, NULL, NULL);
+
+	insert__hashmap(res_pt->render_matches, match, replacer, "", compareCharKey, NULL);
+
+	return 0;
+}
+
+int res_render(res_t res, char *name, char *match_start, char *match_end) {
+	res_t *res_pt = res.res_self;
+	res_pt->render = 1;
+
+	// open file:
+	char *full_file_name = malloc(sizeof(char) * (strlen(name) + ((res_pt->fileName && res_pt->fileName[0] == 'f') ? 0 : 6)));
+	strcpy(full_file_name, name);
+	printf("%d %s\n", strlen(name) + ((res_pt->fileName && res_pt->fileName[0] == 'f') ? 0 : 5), full_file_name);
+	if (!res_pt->fileName)
+		strcat(full_file_name, ".html");
+
+	res_pt->matchStart = match_start;
+	res_pt->matchEnd = match_end;
+	
+	int response = res_sendFile(res, full_file_name);
+
+	free(full_file_name);
+	deepdestroy__hashmap(res_pt->render_matches);
+
+	return response;
+}
+
+int fsck_directory(char *major_path, char *minor_fp) {
+	// combine the char *:
+	char *full_path = malloc(sizeof(char) * (strlen(major_path) + strlen(minor_fp)));
+
+	strcpy(full_path, major_path);
+	strcat(full_path, minor_fp + sizeof(char)); // remove first "/"
+
+	FILE *f_ck = fopen(full_path, "r");
+
+	int have_file = f_ck ? 1 : 0;
+
+	if (f_ck)
+		fclose(f_ck);
+
+	free(full_path);
+
+	return have_file;
 }
