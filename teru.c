@@ -1018,10 +1018,16 @@ int res_sendFile(res_t res, char *name) {
 			full_data_index = check_renders(r_scheme, read_line, &full_data, full_data_max, full_data_index);
 		} else {
 			strcat(full_data, read_line);
+			full_data_index += curr_line_len;
 		}
 
 		full_data[full_data_index] = '\0';
 	}
+
+
+	// if res_matches() is used, but not rendering, free
+	if (!r_scheme && res_pt->render_matches)
+		deepdestroy__hashmap(res_pt->render_matches);
 
 	if (r_scheme)
 		destroy_render_scheme(r_scheme);
