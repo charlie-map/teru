@@ -12,8 +12,8 @@ void home_page(req_t req, res_t res) {
 	char *name = req_query(req, "name");
 	printf("name is %s\n", name);
 
-	printf("%d %s\n", res.socket, res.__dirname);
-	res_sendFile(res, "home.html");
+	res_matches(res, "NAME", name);
+	res_render(res, "home", "{{", "}}");
 
 	return;
 }

@@ -129,6 +129,7 @@ int app_listen(char *HOST, char *PORT, teru_t app) {
 	pthread_create(&accept_thread, NULL, &acceptor_function, app.app_ptr);
 
 	printf("server go vroom\n");
+	printf("\033[0;37m");
 
 	while (getchar() != '0');
 
@@ -339,7 +340,9 @@ void destroy_req_t(req_t *r) {
 }
 
 void destroy_res_t(res_t *r) {
-	/* NEEDS UPDATING */
+	free(r);
+
+	return;
 }
 /* HEADER PARSER 
 	This handles taking in a header like:
@@ -527,14 +530,14 @@ char *req_body(req_t req, char *name) {
 	return (char *) get__hashmap(req.body_map, name, "");
 }
 
-res_t *create_response_struct(int socket, int status_code, char *__dirname) {
+res_t *create_response_struct(int socket, hashmap *status_code, char *__dirname) {
 	res_t *res = malloc(sizeof(res_t));
 
 	res->res_self = res;
 
 	res->render = 0;
 	res->fileName = NULL; res->matchStart = NULL; res->matchEnd = NULL;
-	mp_h->render_matches = NULL;
+	res->render_matches = NULL;
 
 	res->socket = socket;
 	res->status_code = status_code;
@@ -725,9 +728,10 @@ void *connection(void *app_ptr) {
 		// can call the handler with the data
 		res_t *res = create_response_struct(new_fd, app.status_code,
 			(char *) (is_public ? get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, "") : get__hashmap(app.set_settings, "setviews", "")));
-		((listen_t *) reader->payload)->handler(*new_request, res);
+		((listen_t *) reader->payload)->handler(*new_request, *res);
 
 		destroy_req_t(new_request);
+		destroy_res_t(res);
 		clear__hashmap__response(handler);
 	}
 
@@ -789,27 +793,36 @@ typedef struct RenderSchema {
 
 	int render_start_matcher_length, render_end_matcher_length;
 
+	int *max_render_match_buffer, render_match_buffer_index;
+	char *render_match_buffer;
+
 	char *render_match_check;
 	char *render_start_matcher, *render_end_matcher;
 
 	hashmap *res_render_matches;
 } render_scheme_t;
-render_scheme_t *create_render_scheme(res_t res) {
+render_scheme_t *create_render_scheme(res_t *res) {
 	render_scheme_t *new_scheme = malloc(sizeof(render_scheme_t));
 
+	new_scheme->max_render_match_check = malloc(sizeof(int));
 	*new_scheme->max_render_match_check = 8;
 	new_scheme->render_match_check_index = 0;
 	new_scheme->render_start_matcher_index = 0;
 	new_scheme->render_end_matcher_index = 0;
 
-	new_scheme->render_start_matcher_length = strlen(res.matchStart);
-	new_scheme->render_end_matcher_length = strlen(res.matchEnd);
+	new_scheme->max_render_match_buffer = malloc(sizeof(int));
+	*new_scheme->max_render_match_buffer = 8;
+	new_scheme->render_match_buffer_index = 0;
 
-	new_scheme->res_render_matches = res.render_matches;
+	new_scheme->render_start_matcher_length = strlen(res->matchStart);
+	new_scheme->render_end_matcher_length = strlen(res->matchEnd);
 
+	new_scheme->res_render_matches = res->render_matches;
+
+	new_scheme->render_match_buffer = malloc(sizeof(char) * 8);
 	new_scheme->render_match_check = malloc(sizeof(char) * 8);
-	new_scheme->render_start_matcher = malloc(sizeof(char) * new_scheme->render_start_matcher_length);
-	new_scheme->render_end_matcher = malloc(sizeof(char) * new_scheme->render_end_matcher_length);
+	new_scheme->render_start_matcher = res->matchStart;
+	new_scheme->render_end_matcher = res->matchEnd;
 
 	return new_scheme;
 }
@@ -824,52 +837,140 @@ int scheme_reset(render_scheme_t *r_scheme) {
 	return 0;
 }
 
-char *check_renders(render_scheme_t *r_scheme, char *full_line, char **full_data
+int destroy_render_scheme(render_scheme_t *r_scheme) {
+	free(r_scheme->max_render_match_check);
+	free(r_scheme->max_render_match_buffer);
+
+	free(r_scheme->render_match_check);
+	free(r_scheme->render_match_buffer);
+
+	free(r_scheme);
+
+	return 0;
+}
+
+int check_renders(render_scheme_t *r_scheme, char *full_line, char **full_data,
 	int *full_data_max, int full_data_index) {
+	
+	int has_found_start_match; // checking if the matcher indices have changed
+	int has_index_change; // for checking if data in buffer needs
+							  // to be written to full_data
 	// read through the line and check against render matches and see if we should start reading a key
+	for (int read_full_line = 0; full_line[read_full_line]; read_full_line++) {
+		has_index_change = 0;
+		has_found_start_match = 0;
+		// casing:
+		// no nothing, look for render_start_matcher
+		if (r_scheme->render_start_matcher_index < r_scheme->render_start_matcher_length) {
+			// check for if line matches renderer:
+			if (full_line[read_full_line] == r_scheme->render_start_matcher[r_scheme->render_start_matcher_index]) {
+				has_found_start_match = 1;
+				r_scheme->render_start_matcher_index++;
 
-	// casing:
-	// no nothing, look for render_start_matcher
-	if (!r_scheme->render_match_check_index &&
-		!r_scheme->render_start_matcher_index &&
-		!r_scheme->render_end_matcher_index) {
+				if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length - 1)
+					r_scheme->render_match_buffer_index = 0;
+			} else {
+				has_index_change = r_scheme->render_start_matcher_index > 0;
+				r_scheme->render_start_matcher_index = 0;
+			}
+		}
+		if (r_scheme->render_start_matcher_index == r_scheme->render_end_matcher_length &&
+			r_scheme->render_end_matcher_index < r_scheme->render_end_matcher_length) {
+			if (full_line[read_full_line] == r_scheme->render_end_matcher[r_scheme->render_end_matcher_index]) {
+				has_found_start_match = 1;
+				r_scheme->render_end_matcher_index++;
+			} else {
+				has_index_change = r_scheme->render_end_matcher_index > 0;
+				r_scheme->render_end_matcher_index = 0;
+			}
+		}
 
-	// have render_start_matcher, start reading directly into rendoer_match_check
-	// and looking for render_end_matcher
-	}
-	// find render_end_matcher:
-		// close connection
-	if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length &&
-		r_scheme->render_end_matcher_index == r_scheme->render_end_matcher_length) {
-		// see what should be in the place of this found word:
-		char *replacer = get__hashmap(r_scheme->res_render_matches, r_scheme->render_match_check, "");
-		int replacer_len = strlen(replacer);
+		// check if a character should be briefly stored in buffer to see
+		// if the character is part of the start or end matcher
+		if (has_found_start_match && (r_scheme->render_start_matcher_index < r_scheme->render_start_matcher_length ||
+			r_scheme->render_end_matcher_index < r_scheme->render_end_matcher_length)) {
 
-		*full_data = resize_array(*full_data, full_data_max, full_data_index + replacer_len, sizeof(char));
+			// copy character into buffer
+			r_scheme->render_match_buffer[r_scheme->render_match_buffer_index] = full_line[read_full_line];
+			r_scheme->render_match_buffer_index++;
 
-		strcat(*full_data, replacer);
+			r_scheme->render_match_buffer = resize_array(r_scheme->render_match_buffer, r_scheme->max_render_match_buffer, r_scheme->render_match_buffer_index, sizeof(char));
+			r_scheme->render_match_buffer[r_scheme->render_match_buffer_index] = '\0';
+		
+			continue;
+		}
 
-		// reset data
-		scheme_reset(r_scheme);
+		if (has_index_change) {
+			// read render_match_buffer into full_data
+			*full_data = resize_array(*full_data, full_data_max, full_data_index + r_scheme->render_match_buffer_index, sizeof(char));
 
-		full_data_index += replacer_len;
-	} else if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length) {
-		// add to full_data 
+			strcat(*full_data, r_scheme->render_match_buffer);
+			r_scheme->render_match_buffer_index = 0;
+		}
+
+		// have render_start_matcher, start reading directly into render_match_check
+		if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length &&
+			r_scheme->render_end_matcher_index != r_scheme->render_end_matcher_length) {
+
+			r_scheme->render_match_check[r_scheme->render_match_check_index] = full_line[read_full_line];
+			r_scheme->render_match_check_index++;
+
+			r_scheme->render_match_check = resize_array(r_scheme->render_match_check, r_scheme->max_render_match_check, r_scheme->render_match_check_index, sizeof(char));
+			r_scheme->render_match_check[r_scheme->render_match_check_index] = '\0';
+
+			continue;
+		}
+		// find render_end_matcher:
+			// close connection
+		if (r_scheme->render_start_matcher_index == r_scheme->render_start_matcher_length &&
+			r_scheme->render_end_matcher_index == r_scheme->render_end_matcher_length) {
+			// see what should be in the place of this found word:
+			char *replacer = get__hashmap(r_scheme->res_render_matches, r_scheme->render_match_check, "");
+			
+			if (!replacer) {
+				scheme_reset(r_scheme);
+				continue;
+			}
+
+			int replacer_len = strlen(replacer);
+
+			*full_data = resize_array(*full_data, full_data_max, full_data_index + replacer_len, sizeof(char));
+
+			strcat(*full_data, replacer);
+
+			// reset data
+			scheme_reset(r_scheme);
+
+			full_data_index += replacer_len;
+		} else {
+			// add to full_data
+			(*full_data)[full_data_index] = full_line[read_full_line];
+			full_data_index++;
+
+			(*full_data)[full_data_index] = '\0';
+		}
 	}
 
 	return full_data_index;
 }
 /* RESULT SENDERS */
 int res_sendFile(res_t res, char *name) {
-	if (res.render && (!res.matchStart || !res.matchEnd)) {
+	res_t *res_pt = res.res_self;
+
+	if (res_pt->render && (!res_pt->matchStart || !res_pt->matchEnd)) {
 		printf("\033[0;31m");
 		printf("\n** Render match schema failed -- missing: %s%s%s **\n",
-			res.matchStart ? "" : "start match ", !res.matchStart && !res.matchEnd ?
-			"and " : "", res.matchEnd ? "" : "end match");
+			res_pt->matchStart ? "" : "start match ", !res_pt->matchStart && !res_pt->matchEnd ?
+			"and " : "", res_pt->matchEnd ? "" : "end match");
 		printf("\033[0;37m");
-	}
 
-	res_t *res_pt = res->res_self;
+		char *err_msg = malloc(sizeof(char) * (27));
+		sprintf(err_msg, "Render match schema failed");
+		data_send(res.socket, res.status_code, 500, "-t", err_msg);
+		free(err_msg);
+
+		return 0;
+	}
 
 	// load full file path
 	int full_fpath_len = strlen(res.__dirname ? res.__dirname : getenv("PWD")) + strlen(name) +
@@ -906,19 +1007,24 @@ int res_sendFile(res_t res, char *name) {
 	full_data[0] = '\0';
 
 	/* RENDER SCHEMES */
-	render_scheme_t *r_scheme = res.render ? create_render_scheme(res) : NULL;
+	render_scheme_t *r_scheme = res_pt->render ? create_render_scheme(res_pt) : NULL;
 
 	int curr_line_len = 0;
 	while ((curr_line_len = getline(&read_line, &read_line_size, f_pt)) != -1) {
-		full_data_index += curr_line_len;
-		full_data = resize_array(full_data, full_data_max, full_data_index + 1, sizeof(char));
+		full_data = resize_array(full_data, full_data_max, full_data_index + curr_line_len + 1, sizeof(char));
 
 		// check for if any rendering calculations should occur
-		if (res.render)
+		if (res_pt->render) {
 			full_data_index = check_renders(r_scheme, read_line, &full_data, full_data_max, full_data_index);
+		} else {
+			strcat(full_data, read_line);
+		}
 
 		full_data[full_data_index] = '\0';
 	}
+
+	if (r_scheme)
+		destroy_render_scheme(r_scheme);
 
 	free(read_line);
 	fclose(f_pt);
@@ -938,7 +1044,7 @@ int res_end(res_t res, char *data) {
 }
 
 int res_matches(res_t res, char *match, char *replacer) {
-	res_t *res_pt = res->res_self;
+	res_t *res_pt = res.res_self;
 
 	if (!res_pt->render_matches)
 		res_pt->render_matches = make__hashmap(0, NULL, NULL);
@@ -948,17 +1054,26 @@ int res_matches(res_t res, char *match, char *replacer) {
 	return 0;
 }
 
-int res_render(res_t res, char *name) {
-	res_t *res_pt = res->res_self;
+int res_render(res_t res, char *name, char *match_start, char *match_end) {
+	res_t *res_pt = res.res_self;
 	res_pt->render = 1;
 
 	// open file:
-	char *full_file_name = malloc(sizeof(char) * (strlen(name) + (res_pt->fileName == 'f' ? 5 : 0)));
+	char *full_file_name = malloc(sizeof(char) * (strlen(name) + ((res_pt->fileName && res_pt->fileName[0] == 'f') ? 0 : 6)));
 	strcpy(full_file_name, name);
+	printf("%d %s\n", strlen(name) + ((res_pt->fileName && res_pt->fileName[0] == 'f') ? 0 : 5), full_file_name);
 	if (!res_pt->fileName)
 		strcat(full_file_name, ".html");
+
+	res_pt->matchStart = match_start;
+	res_pt->matchEnd = match_end;
 	
-	return res_sendFile(res, full_file_name);
+	int response = res_sendFile(res, full_file_name);
+
+	free(full_file_name);
+	deepdestroy__hashmap(res_pt->render_matches);
+
+	return response;
 }
 
 int fsck_directory(char *major_path, char *minor_fp) {
