@@ -675,7 +675,7 @@ void *connection(void *app_ptr) {
 		req_t *new_request = read_header_helper(buffer, recv_res / sizeof(char));
 		int request_url_len = strlen(new_request->url);
 
-		// using the new_request, acceess the app to see how to handle it:
+		// using the new_request, access the app to see how to handle it:
 		hashmap__response *handler;
 		if (new_request->url[request_url_len - 1] == '/') // is not a file -- don't look for public directories
 			handler = get__hashmap(app.routes, new_request->url, "w", is_lower_hashmap_data);
@@ -702,7 +702,7 @@ void *connection(void *app_ptr) {
 			// see if there is a file in that folder that corresponds with
 			// the name of the request
 			if (!(new_request->url[request_url_len - 1] == '/') && strcmp(((listen_t *) reader->payload)->r_type, "TERU_PUBLIC") == 0) {
-				if (fsck_directory((char *) get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, new_request->url), new_request->url)) {
+				if (fsck_directory((char *) get__hashmap(app.use_settings, ((listen_t *) reader->payload)->url_wrap, ""), new_request->url)) {
 					is_public = 1;
 					break;
 				}
