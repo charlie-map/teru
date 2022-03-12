@@ -308,7 +308,7 @@ void *get__hashmap(hashmap *hash__m, void *key, char *ep, ...) {
 						ll_search->ll_meat = malloc(sizeof(void *) * ll_search->max__arrLength * 2);
 						((void **) ll_search->ll_meat)[0] = ll_tempMeatStorage;
 
-						returnMeat->payload = ll_search->ll_meat;
+						returnMeat->payload = ll_tempMeatStorage;
 						returnMeat->next = NULL;
 
 						ll_search->isArray = 1;
