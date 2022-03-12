@@ -649,6 +649,16 @@ int match_hashmap_substrings(void *other_key, void *curr_key) {
 int is_lower_hashmap_data(void *key1, void *key2) {
 	return ((listen_t *) key1)->add_num < ((listen_t *) key2)->add_num;
 }
+
+int contains_filetype(char *url) {
+	for (int check_url = 0; url[check_url]; check_url++) {
+		if (url[check_url] == '.')
+			return 1;
+	}
+
+	return 0;
+}
+
 /* LISTENER FUNCTIONS FOR SOCKET */
 // Based on my trie-suggestor-app (https://github.com/charlie-map/trie-suggestorC/blob/main/server.c) and
 // Beej Hall websockets (http://beej.us/guide/bgnet/html/)
@@ -677,7 +687,7 @@ void *connection(void *app_ptr) {
 
 		// using the new_request, access the app to see how to handle it:
 		hashmap__response *handler;
-		if (new_request->url[request_url_len - 1] == '/') // is not a file -- don't look for public directories
+		if (new_request->url[request_url_len - 1] == '/' || !contains_filetype(new_request->url)) // is not a file -- don't look for public directories
 			handler = get__hashmap(app.routes, new_request->url, "w", is_lower_hashmap_data);
 		else
 			handler = get__hashmap(app.routes, new_request->url, "iw", match_hashmap_substrings, is_lower_hashmap_data);
