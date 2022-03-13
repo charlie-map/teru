@@ -12,7 +12,7 @@ typedef struct SocketData {
 socket_t *get_socket(char *HOST, char *PORT);
 int destroy_socket(socket_t *);
 
-char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size, char *post_data);
+char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size);
 hashmap *read_headers(char *header_str, void (*print_key)(void *), int *header_end);
 // res is the response body, max_len is the length of the
 // char ** returned. So an input of:

@@ -169,7 +169,7 @@ char *build_url(char *request_url, int *req_length, char *query_param, char **at
 	return full_request;
 }
 
-char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size, char *post_data) {
+char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *headers, int post_data_size) {
 	int header_index = 0; *header_max = 32;
 	char *header = malloc(sizeof(char) * *header_max);
 
@@ -202,14 +202,10 @@ char *create_header(int STATUS, int *header_max, hashmap *status_code, hashmap *
 	free(key_num);
 	free(header_key);
 
-	int add_on = (post_data ? strlen(post_data) : 0) + 3;
-	header = resize_array(header, header_max, header_index + add_on, sizeof(char));
+	header = resize_array(header, header_max, header_index + 3, sizeof(char));
 
 	strcat(header, "\n\n");
-	if (post_data)
-		strcat(header, post_data);
-
-	*header_max = header_index + add_on;
+	*header_max = header_index + 3;
 
 	return header;
 }

@@ -307,10 +307,16 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 	}
 
 	int *head_msg_len = malloc(sizeof(int));
-	char *main_head_msg = create_header(status, head_msg_len, status_code, headers, data_length, data);
+	char *main_head_msg = create_header(status, head_msg_len, status_code, headers, data_length);
 
+	// send header
 	int bytes_sent = 0;
+	printf("send header %d: %s\n", *head_msg_len, main_head_msg);
 	while ((bytes_sent = send(sock, main_head_msg + bytes_sent, *head_msg_len - bytes_sent / sizeof(char), 0)) < sizeof(char) * *head_msg_len);
+
+	// if data, send body of message
+	bytes_sent = 0;
+	while ((bytes_sent = send(sock, data + bytes_sent, data_length - bytes_sent, 0)) < data_length);
 
 	free(head_msg_len);
 	if (lengthOf_data_length) free(lengthOf_data_length);
@@ -1019,16 +1025,17 @@ int res_sendFile(res_t res, char *name) {
 	/* RENDER SCHEMES */
 	render_scheme_t *r_scheme = res_pt->render ? create_render_scheme(res_pt) : NULL;
 
-	int curr_line_len = 0;
-	while ((curr_line_len = getline(&read_line, &read_line_size, f_pt)) != -1) {
-		full_data = resize_array(full_data, full_data_max, full_data_index + curr_line_len + 1, sizeof(char));
+	size_t fread_response_length = 0;
+	while ((fread_response_length = fread(read_line, sizeof(char), 64, f_pt)) > 0) {
+		full_data = resize_array(full_data, full_data_max, full_data_index + 65, sizeof(char));
 
 		// check for if any rendering calculations should occur
 		if (res_pt->render) {
 			full_data_index = check_renders(r_scheme, read_line, &full_data, full_data_max, full_data_index);
 		} else {
-			strcat(full_data, read_line);
-			full_data_index += curr_line_len;
+			for (int read_data_in = 0; read_data_in < fread_response_length / sizeof(char); read_data_in++)
+				full_data[full_data_index + read_data_in] = read_line[read_data_in];
+			full_data_index += fread_response_length / sizeof(char);
 		}
 
 		full_data[full_data_index] = '\0';
