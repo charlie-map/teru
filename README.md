@@ -33,17 +33,17 @@ int main() {
 
 Wow! Looks pretty similar to the Express functions. Below lays out the current functions within **Teru**:
 
-1. [teru() -- new Teru](#New-Teru)
+1. [teru() -- new Teru](#new-teru)
 ## App functionalities:
-2. [app_use() -- Public directories and library usage](#Use-Teru)
-3. [app_set() -- Views directory](#Set-Teru)
+2. [app_use() -- Public directories and library usage](#use-teru)
+3. [app_set() -- Views directory](#set-teru)
 ## Send functionalities:
-4. [res_sendFile() -- Send a file](#Send-File-to-User)
-5. [res_end() -- Send a string](#Send-Message-to-User)
-6. [res_render() -- Send a file with match keys that replace to allow for dynamic HTML pages](#Render-File-to-User)
+4. [res_sendFile() -- Send a file](#send-file-to-user)
+5. [res_end() -- Send a string](#send-message-to-user)
+6. [res_render() -- Send a file with match keys that replace to allow for dynamic HTML pages](#render-file-to-user)
 ## Request parameters:
-6. [req_query()](#See-Request-Query-Parameters)
-7. [req_body()](#See-Request-Body-Parameters)
+6. [req_query()](#see-request-query-parameters)
+7. [req_body()](#see-request-body-parameters)
 
 <img src="http://charlie.city/teru_art.png"/>
 
