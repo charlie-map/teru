@@ -75,16 +75,22 @@ char *content_type_infer(hashmap *load_map, char *filename, char *data, int data
 	// first check the file for an ending within the system
 	// find last "." and read data after that
 		// if no ".", try inferring from the data within char *data
+	int isUTF8 = 0;
 
 	int find_p;
-	for (find_p = strlen(filename) - 1; find_p >= 0; find_p--)
+	for (find_p = strlen(filename) - 1; find_p >= 0; find_p--) {
+		if ((int) filename[find_p] > 127 && !isUTF8) {
+			isUTF8 = 1;
+		}
+
 		if (filename[find_p] == '.')
 			break;
+	}
 
 	if (find_p >= 0)
 		return end_type_script_check(load_map, filename, find_p);
 
-	return "text/plain"; // no value
+	return isUTF8 ? "text/plain; charset=utf-8" : "text/plain"; // no value
 }
 
 int is_binary(hashmap *load_map, char *filename) {

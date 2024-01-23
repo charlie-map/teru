@@ -65,7 +65,6 @@ void print_app_settings(void *app_set) {
 	return;
 }
 
-
 /* setup an initial service */
 teru_t teru() {
 	teru_t *app = malloc(sizeof(teru_t));
@@ -279,7 +278,7 @@ void data_send(int sock, hashmap *status_code, int status, char *options, ...) {
 			continue;
 
 		if (options[check_option + 1] == 't') {
-			insert__hashmap(headers, "Content-Type", "text/plain", "", compareCharKey, NULL);
+			insert__hashmap(headers, "Content-Type", "text/plain; charset=utf-8", "", compareCharKey, NULL);
 
 			data = va_arg(read_opts, char *);
 			data_length = strlen(data) + 1;
@@ -383,9 +382,10 @@ int read_query(char *query, int curr_point, hashmap *header_ptr) {
 
 	char *query_key = malloc(sizeof(char) * *query_key_max),
 		 *query_value = malloc(sizeof(char) * *query_value_max);
+	query_key[0] = '\0'; query_value[0] = '\0';
 	int read_key = 1;
 
-	while (query[curr_point] != ' ') {
+	while (query[curr_point] != ' ' && query[curr_point] != '\n' && query[curr_point] != '\0') {
 		if (query[curr_point] == '&') {
 			insert__hashmap(header_ptr, query_key, query_value, "", compareCharKey, destroyCharKey);
 
@@ -1013,6 +1013,8 @@ int res_sendFile(res_t res, char *name) {
 		return 1;
 	}
 
+	fseek(f_pt, 0, SEEK_END);
+
 	// if file opens, read from file to create a new request
 	size_t read_line_size = sizeof(char) * 64;
 	char *read_line = malloc(read_line_size);
@@ -1027,6 +1029,7 @@ int res_sendFile(res_t res, char *name) {
 
 	size_t fread_response_length = 0;
 	while ((fread_response_length = fread(read_line, sizeof(char), 64, f_pt)) > 0) {
+		printf("add to: %d %s\n", fread_response_length, read_line);
 		full_data = resize_array(full_data, full_data_max, full_data_index + 65, sizeof(char));
 
 		// check for if any rendering calculations should occur
